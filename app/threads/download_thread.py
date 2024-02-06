@@ -12,10 +12,37 @@ class DownloadingThread(QThread):
     download_finished = pyqtSignal(str)
     download_failed = pyqtSignal(str)
 
-    def __init__(self, url, save_dir):
+    def __init__(self, url, save_dir, quality):
         super().__init__()
         self.url = url
         self.save_dir = save_dir
+        self.quality = quality
+
+    # Handle selected quality and return yt-dlp format string
+    def Handle_quality_format(self):
+        if ("+" in self.quality) or ("/" in self.quality) or ("[" in self.quality):
+            return self.quality
+
+        if self.quality == "Audio only (139)":
+            return "139/ba[ext=m4a]"
+
+        if self.quality == "240p":
+            resolution = "240"
+        elif self.quality == "480p":
+            resolution = "480"
+        elif self.quality == "720p":
+            resolution = "720"
+        else:
+            resolution = ""
+
+        if resolution != "":
+            return (
+                f"(bv[height<={resolution}][ext=mp4][container=mp4_dash]+139)/"
+                f"(bv[height<={resolution}][ext=mp4][container=mp4_dash]+ba[ext=m4a])/"
+                f"best[height<={resolution}][ext=mp4]/best"
+            )
+
+        return "(bv[ext=mp4][container=mp4_dash]+139)/(bv[ext=mp4]+ba[ext=m4a])/best[ext=mp4]/best"
 
     def progress_hook(self, d):
         status = ""
@@ -58,15 +85,17 @@ class DownloadingThread(QThread):
 
     def run(self):
         try:
+            selected_format = self.Handle_quality_format()
+
             ydl_opts = {
-                "format": "best[ext=mp4]/best",
+                "format": selected_format,
                 "outtmpl": os.path.join(self.save_dir, "%(title)s.%(ext)s"),
                 "noplaylist": True,
                 "progress_hooks": [self.progress_hook],
                 "quiet": True,
             }
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl: # pyright: ignore[reportArgumentType]
                 ydl.download([self.url])
 
             self.download_finished.emit(self.save_dir)
