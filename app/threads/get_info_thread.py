@@ -8,7 +8,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 # It sends title, duration, thumbnail bytes, and available quality options to MainApp.
 class DownloadInfoThread(QThread):
     vidoes_info = pyqtSignal(dict)
-    info_failed = pyqtSignal()
+    info_failed = pyqtSignal(str)
 
     def __init__(self, url):
         super().__init__()
@@ -19,6 +19,7 @@ class DownloadInfoThread(QThread):
             ydl_opts = {
                 "quiet": True,
                 "skip_download": True,
+                "no_warnings": True,
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: # type: ignore
@@ -113,7 +114,6 @@ class DownloadInfoThread(QThread):
             resolution = str(format_info.get("resolution", "N/A"))
             extenstion = str(format_info.get("ext", "N/A"))
             filesize = self.get_size_bytes(format_info, duration_seconds)
-            print (i,'-id:', format_id, 'res:', resolution, 'ext:', extenstion, 'size:', filesize)
             if filesize is None:
                 filesize = 0
 
@@ -154,6 +154,4 @@ class DownloadInfoThread(QThread):
             "label": "Best",
             "format": "(bv[ext=mp4][container=mp4_dash]+139)/(bv[ext=mp4][container=mp4_dash]+140)/(bv[ext=mp4]+ba[ext=m4a])/best[ext=mp4]/best",
         })
-        print('#' * 100)
-        print(len(formats), ' - ', len(filtered_formats))
         return quality_items

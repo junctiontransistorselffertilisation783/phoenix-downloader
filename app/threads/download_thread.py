@@ -1,6 +1,7 @@
 import os
 
 import yt_dlp
+from yt_dlp.utils import DownloadCancelled
 from PyQt5.QtCore import QThread, pyqtSignal
 
 # DownloadingThread runs yt-dlp in background to keep the GUI responsive.
@@ -11,12 +12,17 @@ class DownloadingThread(QThread):
     status_changed = pyqtSignal(str)
     download_finished = pyqtSignal(str)
     download_failed = pyqtSignal(str)
+    download_cancelled = pyqtSignal()
 
     def __init__(self, url, save_dir, quality):
         super().__init__()
         self.url = url
         self.save_dir = save_dir
         self.quality = quality
+        self.stop_requested = False
+
+    def Cancel_download(self):
+        self.stop_requested = True
 
     # Handle selected quality and return yt-dlp format string
     def Handle_quality_format(self):
@@ -45,6 +51,9 @@ class DownloadingThread(QThread):
         return "(bv[ext=mp4][container=mp4_dash]+139)/(bv[ext=mp4]+ba[ext=m4a])/best[ext=mp4]/best"
 
     def progress_hook(self, d):
+        if self.stop_requested:
+            raise DownloadCancelled("Download cancelled by user")
+
         status = ""
         total_size = 0
         downloaded = 0
@@ -93,12 +102,21 @@ class DownloadingThread(QThread):
                 "noplaylist": True,
                 "progress_hooks": [self.progress_hook],
                 "quiet": True,
+                "no_warnings": True,
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: # pyright: ignore[reportArgumentType]
                 ydl.download([self.url])
 
+            if self.stop_requested:
+                self.download_cancelled.emit()
+                return
+
             self.download_finished.emit(self.save_dir)
 
         except Exception as error:
+            if self.stop_requested:
+                self.download_cancelled.emit()
+                return
+
             self.download_failed.emit(str(error))
