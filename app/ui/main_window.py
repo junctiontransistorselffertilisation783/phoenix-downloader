@@ -7,8 +7,6 @@ from PyQt5.QtWidgets import *
 from app.threads.download_thread import DownloadingThread
 from app.threads.get_info_thread import DownloadInfoThread
 
-# MainApp builds the simple downloader GUI window.
-# It validates user inputs, starts DownloadingThread, and updates the UI through thread signals.
 
 class MainApp(QMainWindow):
     def __init__(self):
@@ -16,120 +14,265 @@ class MainApp(QMainWindow):
         self.download_thread = None
         self.info_thread = None
         self.video_info_loaded = False
+        self.current_info_type = "video"
         self.is_downloading = False
+        self.playlist_entries = []
+        self.playlist_title = ""
+        self.playlist_policy_quality_items = []
+        self.selected_playlist_entry = None
         self.settings = QSettings("PhoenixDownloader", "PhoenixDownloaderApp")
         self.setWindowTitle("Phoenix Downloader")
-        self.resize(860, 560)
+        self.resize(930, 710)
+        self.setMinimumSize(900, 660)
         self.init_ui()
         self.Load_saved_data()
+        self.Reset_video_info()
 
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        main_layout = QVBoxLayout(central_widget)
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyle(QStyleFactory.create("Fusion"))
 
-        title_label = QLabel("YouTube Video Downloader - First Build")
+        self.setStyleSheet(
+            "QWidget { font-size: 11pt; }"
+            "QLineEdit, QComboBox, QListWidget, QPushButton { min-height: 36px; }"
+            "QPushButton { padding: 6px 14px; border: 1px solid #b9b9b9; border-radius: 7px; background: #f8f8f8; }"
+            "QPushButton:hover { background: #f1f1f1; }"
+            "QPushButton:disabled { color: #888; background: #f1f1f1; }"
+            "QComboBox, QLineEdit, QListWidget { border: 1px solid #bfbfbf; border-radius: 6px; background: white; }"
+            "QComboBox { padding: 4px 34px 4px 10px; }"
+            "QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 28px; border-left: 1px solid #d8d8d8; }"
+            "QLineEdit { padding: 4px 10px; }"
+            "QListWidget { padding: 4px; }"
+            "QGroupBox { font-weight: 600; border: 1px solid #c8c8c8; border-radius: 6px; margin-top: 12px; padding-top: 14px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }"
+        )
+
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(18, 14, 18, 16)
+        main_layout.setSpacing(12)
+
+        title_label = QLabel("Phoenix Downloader")
         title_font = QFont()
-        title_font.setPointSize(12)
+        title_font.setPointSize(15)
         title_font.setBold(True)
         title_label.setFont(title_font)
         main_layout.addWidget(title_label)
 
-        url_label = QLabel("Video URL")
-        main_layout.addWidget(url_label)
+        url_row = QHBoxLayout()
+        url_row.setSpacing(10)
 
         self.url_input = QComboBox()
         self.url_input.setEditable(True)
         self.url_input.setInsertPolicy(QComboBox.NoInsert)
         self.url_input.setMaxVisibleItems(10)
-        # self.url_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.url_input.setCurrentText("")
-        self.url_input.lineEdit().setPlaceholderText("https://www.youtube.com/watch?v=...")
+        self.url_input.lineEdit().setPlaceholderText("Enter or paste YouTube URL here")
         self.url_input.lineEdit().returnPressed.connect(self.Handle_get_video_info)
-        self.url_input.editTextChanged.connect(self.Reset_video_info)
+        self.url_input.editTextChanged.connect(self.Handle_url_text_changed)
         self.url_completer = self.url_input.completer()
         self.url_completer.setCaseSensitivity(Qt.CaseInsensitive)
         self.url_completer.setCompletionMode(QCompleter.PopupCompletion)
-        main_layout.addWidget(self.url_input)
+        url_row.addWidget(self.url_input, 1)
 
-        self.get_info_btn = QPushButton("Get Video Info")
+        self.get_info_btn = QPushButton("Load Video Info")
         self.get_info_btn.clicked.connect(self.Handle_get_video_info)
-        main_layout.addWidget(self.get_info_btn)
+        self.get_info_btn.setMinimumWidth(170)
+        url_row.addWidget(self.get_info_btn)
+        main_layout.addLayout(url_row)
 
-        self.video_title_label = QLabel("Title: -")
-        self.video_title_label.setWordWrap(True)
-        main_layout.addWidget(self.video_title_label)
+        path_row = QHBoxLayout()
+        path_row.setSpacing(10)
 
-        self.video_duration_label = QLabel("Duration: -")
-        main_layout.addWidget(self.video_duration_label)
-
-        self.thumbnail_label = QLabel()
-        self.thumbnail_label.setFixedSize(320, 180)
-        self.thumbnail_label.setStyleSheet("border: 1px solid #999;")
-        self.thumbnail_label.setScaledContents(True)
-        self.thumbnail_label.setText("Thumbnail")
-        thumbnail_layout = QHBoxLayout()
-        thumbnail_layout.addStretch()
-        thumbnail_layout.addWidget(self.thumbnail_label)
-        thumbnail_layout.addStretch()
-        main_layout.addLayout(thumbnail_layout)
-
-        folder_label = QLabel("Save Folder")
-        main_layout.addWidget(folder_label)
-
-        folder_layout = QHBoxLayout()
-        self.path_input = QLineEdit()
-        self.path_input.setText(self.Get_default_folder())
-        folder_layout.addWidget(self.path_input)
+        self.path_input = QComboBox()
+        self.path_input.setEditable(True)
+        self.path_input.setInsertPolicy(QComboBox.NoInsert)
+        self.path_input.setMaxVisibleItems(10)
+        self.path_input.lineEdit().setPlaceholderText("Select download folder")
+        self.path_input.setCurrentText(self.Get_default_folder())
+        self.path_completer = self.path_input.completer()
+        self.path_completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.path_completer.setCompletionMode(QCompleter.PopupCompletion)
+        path_row.addWidget(self.path_input, 1)
 
         self.browse_btn = QPushButton("Browse")
         self.browse_btn.clicked.connect(self.Handle_location)
-        folder_layout.addWidget(self.browse_btn)
+        self.browse_btn.setMinimumWidth(120)
+        path_row.addWidget(self.browse_btn)
+        main_layout.addLayout(path_row)
 
-        main_layout.addLayout(folder_layout)
+        options_row = QHBoxLayout()
+        options_row.setSpacing(16)
 
-        quality_label = QLabel("Video Quality")
-        main_layout.addWidget(quality_label)
+        self.quality_wrap = QWidget()
+        quality_layout = QVBoxLayout(self.quality_wrap)
+        quality_layout.setContentsMargins(0, 0, 0, 0)
+        quality_layout.setSpacing(6)
+
+        self.quality_label = QLabel("Video Quality")
+        quality_layout.addWidget(self.quality_label)
 
         self.quality_comboBox = QComboBox()
-        self.quality_comboBox.addItem("Load video info first")
-        main_layout.addWidget(self.quality_comboBox)
+        self.quality_comboBox.setMinimumWidth(390)
+        quality_layout.addWidget(self.quality_comboBox)
+        options_row.addWidget(self.quality_wrap, 0, Qt.AlignLeft)
+
+        self.playlist_action_wrap = QWidget()
+        playlist_action_layout = QVBoxLayout(self.playlist_action_wrap)
+        playlist_action_layout.setContentsMargins(0, 0, 0, 0)
+        playlist_action_layout.setSpacing(6)
+
+        playlist_action_label = QLabel("Playlist Download")
+        playlist_action_layout.addWidget(playlist_action_label)
+
+        self.playlist_action_combo = QComboBox()
+        self.playlist_action_combo.setMinimumWidth(290)
+        self.playlist_action_combo.addItem("Download selected video", "selected")
+        self.playlist_action_combo.addItem("Download full playlist", "playlist")
+        self.playlist_action_combo.currentIndexChanged.connect(self.Handle_playlist_action_changed)
+        playlist_action_layout.addWidget(self.playlist_action_combo)
+        options_row.addWidget(self.playlist_action_wrap, 0, Qt.AlignLeft)
+        options_row.addStretch()
+        main_layout.addLayout(options_row)
+
+        self.info_group = QGroupBox("Loaded Media")
+        info_layout = QVBoxLayout(self.info_group)
+        info_layout.setContentsMargins(14, 12, 14, 14)
+        info_layout.setSpacing(12)
+
+        media_top_row = QHBoxLayout()
+        media_top_row.setSpacing(16)
+
+        self.thumbnail_label = QLabel()
+        self.thumbnail_label.setFixedSize(500, 282)
+        self.thumbnail_label.setAlignment(Qt.AlignCenter)
+        self.thumbnail_label.setStyleSheet("border: 1px solid #bfbfbf; border-radius: 6px; background: #f2f2f2;")
+        media_top_row.addWidget(self.thumbnail_label, 0, Qt.AlignTop)
+
+        media_text_col = QVBoxLayout()
+        media_text_col.setSpacing(10)
+
+        self.info_type_label = QLabel("")
+        self.info_type_label.setStyleSheet("font-weight: 600; color: #555;")
+        media_text_col.addWidget(self.info_type_label)
+
+        self.video_title_label = QLabel("")
+        self.video_title_label.setWordWrap(True)
+        title_font2 = QFont()
+        title_font2.setPointSize(13)
+        title_font2.setBold(True)
+        self.video_title_label.setFont(title_font2)
+        media_text_col.addWidget(self.video_title_label)
+
+        self.video_duration_label = QLabel("")
+        self.video_duration_label.setWordWrap(True)
+        media_text_col.addWidget(self.video_duration_label)
+
+        self.info_hint_label = QLabel("")
+        self.info_hint_label.setWordWrap(True)
+        self.info_hint_label.setStyleSheet("color: #555;")
+        media_text_col.addWidget(self.info_hint_label)
+
+        self.playlist_count_value = QLabel("")
+        media_text_col.addWidget(self.playlist_count_value)
+
+        self.playlist_total_duration_value = QLabel("")
+        media_text_col.addWidget(self.playlist_total_duration_value)
+
+        self.playlist_selected_value = QLabel("")
+        self.playlist_selected_value.setWordWrap(True)
+        media_text_col.addWidget(self.playlist_selected_value)
+
+        self.playlist_preview_list = QListWidget()
+        self.playlist_preview_list.setMinimumHeight(230)
+        self.playlist_preview_list.itemSelectionChanged.connect(self.Handle_playlist_selection)
+        media_text_col.addWidget(self.playlist_preview_list, 1)
+
+        media_text_col.addStretch()
+
+        media_top_row.addLayout(media_text_col, 1)
+        info_layout.addLayout(media_top_row)
+        main_layout.addWidget(self.info_group)
+
+        progress_label = QLabel("Download Info")
+        progress_label.setStyleSheet("color: #444; font-size: 10pt;")
+        main_layout.addWidget(progress_label)
+
+        progress_group = QGroupBox("Download Progress")
+        progress_layout = QVBoxLayout(progress_group)
+        progress_layout.setContentsMargins(14, 12, 14, 14)
+        progress_layout.setSpacing(8)
+
+        self.status_label = QLabel("Ready")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        status_font = QFont()
+        status_font.setBold(True)
+        self.status_label.setFont(status_font)
+        progress_layout.addWidget(self.status_label)
 
         self.progressBar = QProgressBar()
         self.progressBar.setRange(0, 100)
         self.progressBar.setValue(0)
-        main_layout.addWidget(self.progressBar)
+        self.progressBar.setTextVisible(True)
+        self.progressBar.setFormat("%p%")
+        self.progressBar.setAlignment(Qt.AlignCenter)
+        self.progressBar.setMinimumHeight(26)
+        progress_layout.addWidget(self.progressBar)
 
-        self.status_label = QLabel("Ready")
-        main_layout.addWidget(self.status_label)
+        self.progress_details_label = QLabel("")
+        self.progress_details_label.setAlignment(Qt.AlignCenter)
+        self.progress_details_label.setWordWrap(True)
+        self.progress_details_label.setStyleSheet("color: #555;")
+        progress_layout.addWidget(self.progress_details_label)
+        main_layout.addWidget(progress_group)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch()
 
         self.downloadButton = QPushButton("Download Video")
         self.downloadButton.clicked.connect(self.Handle_download)
         self.downloadButton.setEnabled(False)
-        main_layout.addWidget(self.downloadButton)
+        self.downloadButton.setMinimumWidth(240)
+        self.downloadButton.setMinimumHeight(42)
+        button_row.addWidget(self.downloadButton)
 
         self.cancelButton = QPushButton("Cancel Download")
         self.cancelButton.clicked.connect(self.Handle_cancel_download)
         self.cancelButton.setEnabled(False)
-        main_layout.addWidget(self.cancelButton)
+        self.cancelButton.setMinimumWidth(240)
+        self.cancelButton.setMinimumHeight(42)
+        self.cancelButton.hide()
+        button_row.addWidget(self.cancelButton)
 
-    def Reset_video_info(self):
-        if self.is_downloading:
-            return
+        button_row.addStretch()
+        main_layout.addLayout(button_row)
 
-        self.video_info_loaded = False
-        self.downloadButton.setEnabled(False)
-        self.cancelButton.setEnabled(False)
-        self.quality_comboBox.clear()
-        self.quality_comboBox.addItem("Load video info first")
-        self.video_title_label.setText("Title: -")
-        self.video_duration_label.setText("Duration: -")
-        self.thumbnail_label.clear()
-        self.thumbnail_label.setText("Thumbnail")
+    def Set_download_controls(self, downloading):
+        if downloading:
+            self.downloadButton.hide()
+            self.cancelButton.show()
+            self.cancelButton.setEnabled(True)
+        else:
+            self.cancelButton.hide()
+            self.cancelButton.setEnabled(False)
+            self.downloadButton.show()
+
+    def Set_inputs_enabled(self, enabled):
+        self.get_info_btn.setEnabled(enabled)
+        self.url_input.setEnabled(enabled)
+        self.path_input.setEnabled(enabled)
+        self.browse_btn.setEnabled(enabled)
+        self.quality_comboBox.setEnabled(enabled)
+        self.playlist_action_combo.setEnabled(enabled)
+        self.playlist_preview_list.setEnabled(enabled)
 
     def Get_url_text(self):
         return self.url_input.currentText().strip()
+
+    def Get_save_path_text(self):
+        return self.path_input.currentText().strip()
 
     def Get_default_folder(self):
         saved_folder = self.settings.value("last_folder", "")
@@ -143,21 +286,29 @@ class MainApp(QMainWindow):
         if saved_urls is None:
             saved_urls = []
 
+        self.url_input.blockSignals(True)
         self.url_input.clear()
         for url in saved_urls:
             if url:
                 self.url_input.addItem(url)
-
         self.url_input.setCurrentText("")
+        self.url_input.blockSignals(False)
 
-        saved_folder = self.settings.value("last_folder", "")
-        if saved_folder and os.path.isdir(saved_folder):
-            self.path_input.setText(saved_folder)
+        saved_paths = self.settings.value("recent_paths", [], type=list)
+        if saved_paths is None:
+            saved_paths = []
 
-    def Save_folder_history(self):
-        folder = self.path_input.text().strip()
-        if folder != "":
-            self.settings.setValue("last_folder", folder)
+        default_folder = self.Get_default_folder()
+        if default_folder not in saved_paths:
+            saved_paths.insert(0, default_folder)
+
+        self.path_input.blockSignals(True)
+        self.path_input.clear()
+        for folder in saved_paths[:15]:
+            if folder:
+                self.path_input.addItem(folder)
+        self.path_input.setCurrentText(default_folder)
+        self.path_input.blockSignals(False)
 
     def Save_url_history(self, url):
         if url == "":
@@ -170,19 +321,200 @@ class MainApp(QMainWindow):
         saved_urls = [saved_url for saved_url in saved_urls if saved_url != url]
         saved_urls.insert(0, url)
         saved_urls = saved_urls[:15]
-
         self.settings.setValue("recent_urls", saved_urls)
 
+        self.url_input.blockSignals(True)
         self.url_input.clear()
         for saved_url in saved_urls:
             self.url_input.addItem(saved_url)
         self.url_input.setCurrentText(url)
+        self.url_input.blockSignals(False)
+
+    def Save_folder_history(self):
+        folder = self.Get_save_path_text()
+        if folder == "":
+            return
+
+        self.settings.setValue("last_folder", folder)
+
+        saved_paths = self.settings.value("recent_paths", [], type=list)
+        if saved_paths is None:
+            saved_paths = []
+
+        saved_paths = [saved_path for saved_path in saved_paths if saved_path != folder]
+        saved_paths.insert(0, folder)
+        saved_paths = saved_paths[:15]
+        self.settings.setValue("recent_paths", saved_paths)
+
+        self.path_input.blockSignals(True)
+        self.path_input.clear()
+        for saved_path in saved_paths:
+            self.path_input.addItem(saved_path)
+        self.path_input.setCurrentText(folder)
+        self.path_input.blockSignals(False)
 
     def Handle_location(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select save folder", self.path_input.text())
+        folder = QFileDialog.getExistingDirectory(self, "Select save folder", self.Get_save_path_text())
         if folder:
-            self.path_input.setText(folder)
+            self.path_input.setCurrentText(folder)
             self.Save_folder_history()
+
+    def Detect_url_type(self, url):
+        url = url.lower()
+        if "list=" in url:
+            return "playlist"
+        return "video"
+
+    def Set_thumbnail_data(self, thumbnail_data):
+        self.thumbnail_label.clear()
+
+        if thumbnail_data:
+            pixmap = QPixmap()
+            pixmap.loadFromData(thumbnail_data)
+            pixmap = pixmap.scaled(self.thumbnail_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.thumbnail_label.setPixmap(pixmap)
+        else:
+            self.thumbnail_label.setPixmap(QPixmap())
+
+    def Load_quality_items(self, quality_items, preferred_texts=None):
+        self.quality_comboBox.clear()
+
+        for item in quality_items:
+            label = item.get("label", "")
+            format_code = item.get("format", "")
+            self.quality_comboBox.addItem(label, format_code)
+
+        if preferred_texts:
+            for preferred_text in preferred_texts:
+                for i in range(self.quality_comboBox.count()):
+                    if self.quality_comboBox.itemText(i).startswith(preferred_text):
+                        self.quality_comboBox.setCurrentIndex(i)
+                        return
+
+    def Set_mode_layout(self, info_type):
+        self.current_info_type = info_type
+
+        if info_type == "playlist":
+            self.playlist_action_wrap.show()
+            self.playlist_preview_list.show()
+            self.playlist_count_value.show()
+            self.playlist_total_duration_value.show()
+            self.playlist_selected_value.show()
+            self.quality_label.setText("Quality")
+            self.resize(max(self.width(), 1120), max(self.height(), 800))
+        elif info_type == "video":
+            self.playlist_action_wrap.hide()
+            self.playlist_preview_list.hide()
+            self.playlist_count_value.hide()
+            self.playlist_total_duration_value.hide()
+            self.playlist_selected_value.hide()
+            self.quality_label.setText("Quality")
+            self.resize(930, 710)
+        else:
+            self.playlist_action_wrap.hide()
+            self.playlist_preview_list.hide()
+            self.playlist_count_value.hide()
+            self.playlist_total_duration_value.hide()
+            self.playlist_selected_value.hide()
+            self.resize(930, 710)
+
+    def Update_download_button_text(self):
+        if self.current_info_type == "playlist":
+            if self.playlist_action_combo.currentData() == "playlist":
+                self.downloadButton.setText("Download Playlist")
+            else:
+                self.downloadButton.setText("Download Selected Video")
+        else:
+            self.downloadButton.setText("Download Video")
+
+    def Set_empty_info_state(self):
+        self.playlist_entries = []
+        self.playlist_title = ""
+        self.playlist_policy_quality_items = []
+        self.selected_playlist_entry = None
+        self.video_info_loaded = False
+        self.Set_mode_layout("empty")
+        self.info_group.hide()
+        self.downloadButton.setEnabled(False)
+        self.Set_download_controls(False)
+        self.quality_comboBox.clear()
+        self.progressBar.setValue(0)
+        self.status_label.setText("Ready")
+        self.progress_details_label.setText("")
+        self.Update_download_button_text()
+
+    def Reset_video_info(self):
+        if self.is_downloading:
+            return
+        self.Set_empty_info_state()
+
+    def Handle_url_text_changed(self, _text=""):
+        self.Reset_video_info()
+
+    def Populate_playlist_entries(self, entries):
+        self.playlist_preview_list.clear()
+        first_ready_row = -1
+
+        for row_index, entry in enumerate(entries):
+            prefix = f"{entry.get('index', 0):02d}"
+            title = entry.get("title", "-")
+            duration_text = entry.get("duration_text", "Unknown")
+            availability = "Ready" if entry.get("is_available", False) else "Unavailable"
+            item_text = f"{prefix}  |  {title}  |  {duration_text}  |  {availability}"
+            item = QListWidgetItem(item_text)
+            item.setData(Qt.UserRole, row_index)
+
+            if not entry.get("is_available", False):
+                item.setForeground(QColor("#777777"))
+            elif first_ready_row == -1:
+                first_ready_row = row_index
+
+            self.playlist_preview_list.addItem(item)
+
+        if first_ready_row >= 0:
+            self.playlist_preview_list.setCurrentRow(first_ready_row)
+        elif self.playlist_preview_list.count() > 0:
+            self.playlist_preview_list.setCurrentRow(0)
+
+    def Refresh_playlist_quality_mode(self):
+        if self.current_info_type != "playlist":
+            return
+
+        action = self.playlist_action_combo.currentData()
+        if action == "playlist":
+            self.Load_quality_items(self.playlist_policy_quality_items, ["720p", "Best"])
+            self.progress_details_label.setText("The whole playlist will be saved inside its own folder")
+        else:
+            if self.selected_playlist_entry:
+                entry_quality_items = self.selected_playlist_entry.get("quality_items", [])
+                self.Load_quality_items(entry_quality_items, ["720p", "Best"])
+            self.progress_details_label.setText("The selected playlist video will be downloaded")
+
+        self.Update_download_button_text()
+
+    def Handle_playlist_selection(self):
+        current_item = self.playlist_preview_list.currentItem()
+        if current_item is None:
+            self.selected_playlist_entry = None
+            self.playlist_selected_value.setText("")
+            return
+
+        selected_index = current_item.data(Qt.UserRole)
+        if selected_index is None or selected_index < 0 or selected_index >= len(self.playlist_entries):
+            self.selected_playlist_entry = None
+            self.playlist_selected_value.setText("")
+            return
+
+        entry = self.playlist_entries[selected_index]
+        self.selected_playlist_entry = entry
+        self.playlist_selected_value.setText(f"Selected Video: {entry.get('index', 0):02d} - {entry.get('title', '-')}")
+
+        if self.playlist_action_combo.currentData() == "selected":
+            entry_quality_items = entry.get("quality_items", [])
+            self.Load_quality_items(entry_quality_items, ["720p", "Best"])
+
+    def Handle_playlist_action_changed(self):
+        self.Refresh_playlist_quality_mode()
 
     def Handle_get_video_info(self):
         if self.is_downloading:
@@ -190,7 +522,6 @@ class MainApp(QMainWindow):
             return
 
         url = self.Get_url_text()
-
         if url == "":
             QMessageBox.warning(self, "URL Needed", "Enter YouTube URL first")
             return
@@ -199,11 +530,13 @@ class MainApp(QMainWindow):
             QMessageBox.warning(self, "Invalid URL", "Please enter a valid YouTube URL")
             return
 
-        self.status_label.setText("Loading video info...")
+        url_type = self.Detect_url_type(url)
         self.get_info_btn.setEnabled(False)
         self.downloadButton.setEnabled(False)
+        self.status_label.setText("Loading info...")
+        self.progress_details_label.setText("Reading media details and available formats")
 
-        self.info_thread = DownloadInfoThread(url)
+        self.info_thread = DownloadInfoThread(url, url_type)
         self.info_thread.vidoes_info.connect(self.Handle_video_info)
         self.info_thread.info_failed.connect(self.Handle_info_failed)
         self.info_thread.start()
@@ -211,86 +544,122 @@ class MainApp(QMainWindow):
     def Handle_video_info(self, data):
         self.get_info_btn.setEnabled(True)
         self.Save_url_history(self.Get_url_text())
-
-        title = data.get("title", "-")
-        duration_text = data.get("duration_text", "-")
-        thumbnail_data = data.get("thumbnail_data", None)
-        quality_items = data.get("quality_items", [])
-
-        self.video_title_label.setText(f"Title: {title}")
-        self.video_duration_label.setText(f"Duration: {duration_text}")
-
-        self.thumbnail_label.clear()
-        if thumbnail_data:
-            pixmap = QPixmap()
-            pixmap.loadFromData(thumbnail_data)
-            self.thumbnail_label.setPixmap(pixmap)
-        else:
-            self.thumbnail_label.setText("Thumbnail")
-
-        self.quality_comboBox.clear()
-        for item in quality_items:
-            label = item.get("label", "")
-            format_code = item.get("format", "")
-            self.quality_comboBox.addItem(label, format_code)
-
-        if self.quality_comboBox.count() > 0:
-            for i in range(self.quality_comboBox.count()):
-                txt = self.quality_comboBox.itemText(i)
-                if txt.startswith("720p"):
-                    self.quality_comboBox.setCurrentIndex(i)
-                    break
-
         self.video_info_loaded = True
-        self.downloadButton.setEnabled(True)
-        self.status_label.setText("Video info loaded")
+        self.info_group.show()
+
+        info_type = data.get("info_type", "video")
+        title = data.get("title", "-")
+        uploader = data.get("uploader", "Unknown channel")
+        thumbnail_data = data.get("thumbnail_data", None)
+
+        self.Set_mode_layout(info_type)
+        self.Set_thumbnail_data(thumbnail_data)
+        self.info_hint_label.clear()
+
+        if info_type == "playlist":
+            self.playlist_title = title
+            self.playlist_entries = data.get("entries", [])
+            self.playlist_policy_quality_items = data.get("quality_items", [])
+            playlist_count = data.get("playlist_count", len(self.playlist_entries))
+            total_duration_text = data.get("total_duration_text", "Unknown")
+
+            self.info_type_label.setText("Playlist")
+            self.video_title_label.setText(title)
+            self.video_duration_label.setText(f"Channel: {uploader}")
+            self.playlist_count_value.setText(f"Videos: {playlist_count}")
+            self.playlist_total_duration_value.setText(f"Total Duration: {total_duration_text}")
+            self.Populate_playlist_entries(self.playlist_entries)
+            self.Refresh_playlist_quality_mode()
+            self.downloadButton.setEnabled(len(self.playlist_entries) > 0)
+            self.status_label.setText("Playlist info loaded")
+            self.progress_details_label.setText("Choose selected video or full playlist, then start download")
+        else:
+            duration_text = data.get("duration_text", "-")
+            quality_items = data.get("quality_items", [])
+
+            self.info_type_label.setText("Video")
+            self.video_title_label.setText(title)
+            self.video_duration_label.setText(f"Channel: {uploader}    |    Duration: {duration_text}")
+            self.Load_quality_items(quality_items, ["720p", "Best"])
+            self.downloadButton.setEnabled(self.quality_comboBox.count() > 0)
+            self.status_label.setText("Video info loaded")
+            self.progress_details_label.setText("Choose quality and start download")
+            self.Update_download_button_text()
 
     def Handle_info_failed(self, error_text):
         self.get_info_btn.setEnabled(True)
         self.video_info_loaded = False
         self.downloadButton.setEnabled(False)
-        self.status_label.setText("Failed to load video info")
+        self.status_label.setText("Failed to load info")
+        self.progress_details_label.setText("Could not read this URL")
         QMessageBox.critical(self, "Error", f"Could not load video info:\n{error_text}")
 
-    def Handle_download(self):
+    def Build_download_request(self):
         url = self.Get_url_text()
-        save_dir = self.path_input.text().strip()
+        download_type = "video"
+        playlist_title = ""
+
+        if self.current_info_type == "playlist":
+            action = self.playlist_action_combo.currentData()
+            if action == "playlist":
+                download_type = "playlist"
+                playlist_title = self.playlist_title
+            else:
+                if self.selected_playlist_entry is None:
+                    raise ValueError("Select a playlist video first")
+
+                entry_url = self.selected_playlist_entry.get("webpage_url", "")
+                if entry_url == "":
+                    raise ValueError("The selected playlist video is not available")
+
+                url = entry_url
+
+        return url, download_type, playlist_title
+
+    def Handle_download(self):
+        save_dir = self.Get_save_path_text()
         quality = self.quality_comboBox.currentData()
         if quality is None or quality == "":
             quality = self.quality_comboBox.currentText().strip()
 
-        if url == "":
+        if self.Get_url_text() == "":
             QMessageBox.warning(self, "URL Needed", "Enter YouTube URL first")
-            return
-
-        if ("youtube.com" not in url) and ("youtu.be" not in url):
-            QMessageBox.warning(self, "Invalid URL", "Please enter a valid YouTube URL")
             return
 
         if not os.path.isdir(save_dir):
             QMessageBox.warning(self, "Invalid Folder", "Choose a valid save folder")
             return
 
-        self.Save_folder_history()
-
         if not self.video_info_loaded:
-            QMessageBox.warning(self, "Video Info Needed", "Click Get Video Info first")
+            QMessageBox.warning(self, "Video Info Needed", "Click Load Video Info first")
             return
 
+        try:
+            download_url, download_type, playlist_title = self.Build_download_request()
+        except ValueError as error:
+            QMessageBox.warning(self, "Download Not Ready", str(error))
+            return
+
+        self.Save_folder_history()
         self.progressBar.setValue(0)
         self.status_label.setText("Starting download...")
+
+        if download_type == "playlist":
+            self.progress_details_label.setText("Preparing full playlist download")
+        elif self.current_info_type == "playlist":
+            self.progress_details_label.setText("Preparing selected playlist video")
+        else:
+            self.progress_details_label.setText("Preparing selected video format")
+
         self.is_downloading = True
         self.downloadButton.setEnabled(False)
-        self.get_info_btn.setEnabled(False)
-        self.cancelButton.setEnabled(True)
-        self.url_input.setEnabled(False)
-        self.path_input.setEnabled(False)
-        self.browse_btn.setEnabled(False)
-        self.quality_comboBox.setEnabled(False)
+        self.Set_download_controls(True)
+        self.Set_inputs_enabled(False)
 
-        self.download_thread = DownloadingThread(url, save_dir, quality)
+        self.download_thread = DownloadingThread(download_url, save_dir, quality, download_type, playlist_title)
         self.download_thread.progress_changed.connect(self.Update_progress)
         self.download_thread.status_changed.connect(self.Update_status)
+        self.download_thread.details_changed.connect(self.Update_progress_details)
         self.download_thread.download_finished.connect(self.Download_finished)
         self.download_thread.download_failed.connect(self.Download_failed)
         self.download_thread.download_cancelled.connect(self.Download_cancelled)
@@ -299,6 +668,7 @@ class MainApp(QMainWindow):
     def Handle_cancel_download(self):
         if self.download_thread and self.download_thread.isRunning():
             self.status_label.setText("Cancelling download...")
+            self.progress_details_label.setText("Stopping the active download job")
             self.cancelButton.setEnabled(False)
             self.download_thread.Cancel_download()
 
@@ -308,31 +678,28 @@ class MainApp(QMainWindow):
     def Update_status(self, text):
         self.status_label.setText(text)
 
+    def Update_progress_details(self, text):
+        self.progress_details_label.setText(text)
+
     def Download_finished(self, save_dir):
         self.Save_url_history(self.Get_url_text())
         self.is_downloading = False
         self.download_thread = None
         self.status_label.setText("Download completed")
+        self.progress_details_label.setText("The file was saved successfully")
         self.downloadButton.setEnabled(True)
-        self.get_info_btn.setEnabled(True)
-        self.cancelButton.setEnabled(False)
-        self.url_input.setEnabled(True)
-        self.path_input.setEnabled(True)
-        self.browse_btn.setEnabled(True)
-        self.quality_comboBox.setEnabled(True)
-        QMessageBox.information(self, "Success", f"Video downloaded to:\n{save_dir}")
+        self.Set_download_controls(False)
+        self.Set_inputs_enabled(True)
+        QMessageBox.information(self, "Success", f"Download saved to:\n{save_dir}")
 
     def Download_failed(self, error_text):
         self.is_downloading = False
         self.download_thread = None
         self.status_label.setText("Download failed")
+        self.progress_details_label.setText("The download stopped before the file could be saved")
         self.downloadButton.setEnabled(True)
-        self.get_info_btn.setEnabled(True)
-        self.cancelButton.setEnabled(False)
-        self.url_input.setEnabled(True)
-        self.path_input.setEnabled(True)
-        self.browse_btn.setEnabled(True)
-        self.quality_comboBox.setEnabled(True)
+        self.Set_download_controls(False)
+        self.Set_inputs_enabled(True)
         QMessageBox.critical(self, "Error", f"Download failed:\n{error_text}")
 
     def Download_cancelled(self):
@@ -340,10 +707,7 @@ class MainApp(QMainWindow):
         self.download_thread = None
         self.status_label.setText("Download cancelled")
         self.progressBar.setValue(0)
+        self.progress_details_label.setText("The active download was cancelled")
         self.downloadButton.setEnabled(True)
-        self.get_info_btn.setEnabled(True)
-        self.cancelButton.setEnabled(False)
-        self.url_input.setEnabled(True)
-        self.path_input.setEnabled(True)
-        self.browse_btn.setEnabled(True)
-        self.quality_comboBox.setEnabled(True)
+        self.Set_download_controls(False)
+        self.Set_inputs_enabled(True)

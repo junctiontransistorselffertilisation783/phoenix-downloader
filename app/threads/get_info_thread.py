@@ -10,9 +10,10 @@ class DownloadInfoThread(QThread):
     vidoes_info = pyqtSignal(dict)
     info_failed = pyqtSignal(str)
 
-    def __init__(self, url):
+    def __init__(self, url, url_type):
         super().__init__()
         self.url = url
+        self.url_type = url_type
 
     def run(self):
         try:
@@ -24,21 +25,23 @@ class DownloadInfoThread(QThread):
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: # type: ignore
                 info_dict = ydl.extract_info(self.url, download=False)
-            # print(info_dict) # for test or debug
-            # get the video info
-            data = self.video_info(info_dict)
+
+            if self.url_type == "playlist":
+                data = self.playlist_info(info_dict)
+            else:
+                data = self.video_info(info_dict)
+
             self.vidoes_info.emit(data)
 
         except Exception as error:
             self.info_failed.emit(str(error))
 
     def video_info(self, info_dict):
-        # get teh title and duration
         title = str(info_dict.get("title", "Unknown title"))
         duration_seconds = info_dict.get("duration", 0)
         duration_text = self.format_duration(duration_seconds)
+        uploader = str(info_dict.get("uploader") or info_dict.get("channel") or "Unknown channel")
 
-        # get the thumbnail
         thumbnail_data = None
         thumbnail_url = info_dict.get("thumbnail", "")
         if thumbnail_url:
@@ -48,10 +51,69 @@ class DownloadInfoThread(QThread):
         quality_items = self.Handle_quality_formats(formats, duration_seconds)
 
         return {
+            "info_type": "video",
             "title": title,
+            "uploader": uploader,
             "duration_text": duration_text,
             "thumbnail_data": thumbnail_data,
             "quality_items": quality_items,
+        }
+
+    def playlist_info(self, info_dict):
+        title = str(info_dict.get("title", "Unknown playlist"))
+        uploader = str(info_dict.get("uploader") or info_dict.get("channel") or info_dict.get("playlist_uploader") or "Unknown channel")
+        entries = info_dict.get("entries", [])
+        valid_entries = []
+        total_duration_seconds = 0
+
+        for entry in entries:
+            if entry:
+                valid_entries.append(entry)
+
+        playlist_count = info_dict.get("playlist_count", len(valid_entries))
+        if not playlist_count:
+            playlist_count = len(valid_entries)
+
+        thumbnail_data = None
+        thumbnail_url = info_dict.get("thumbnail", "")
+
+        if (not thumbnail_url) and len(valid_entries) > 0:
+            thumbnail_url = valid_entries[0].get("thumbnail", "")
+
+        if thumbnail_url:
+            thumbnail_data = self.get_thumbnail(thumbnail_url)
+
+        playlist_entries = []
+        for i, entry in enumerate(valid_entries):
+            duration_seconds = entry.get("duration", 0)
+            if duration_seconds:
+                total_duration_seconds += int(duration_seconds)
+
+            entry_formats = entry.get("formats", [])
+            entry_quality_items = []
+            if entry_formats:
+                entry_quality_items = self.Handle_quality_formats(entry_formats, duration_seconds)
+
+            webpage_url = entry.get("webpage_url") or entry.get("url") or ""
+            playlist_entries.append({
+                "index": i + 1,
+                "title": str(entry.get("title", f"Video {i+1}")),
+                "duration_text": self.format_duration(duration_seconds),
+                "duration_seconds": duration_seconds or 0,
+                "webpage_url": str(webpage_url),
+                "is_available": bool(webpage_url),
+                "quality_items": entry_quality_items,
+            })
+
+        return {
+            "info_type": "playlist",
+            "title": title,
+            "uploader": uploader,
+            "playlist_count": playlist_count,
+            "total_duration_text": self.format_duration(total_duration_seconds),
+            "thumbnail_data": thumbnail_data,
+            "entries": playlist_entries,
+            "quality_items": self.Build_playlist_quality_items(),
         }
 
     def get_thumbnail(self, thumbnail_url):
@@ -98,6 +160,30 @@ class DownloadInfoThread(QThread):
         if hours > 0:
             return f"{hours:02d}:{minutes:02d}:{secs:02d}"
         return f"{minutes:02d}:{secs:02d}"
+
+    def Build_playlist_quality_items(self):
+        return [
+            {
+                "label": "Best available",
+                "format": "(bv[ext=mp4][container=mp4_dash]+139)/(bv[ext=mp4][container=mp4_dash]+140)/(bv[ext=mp4]+ba[ext=m4a])/best[ext=mp4]/best",
+            },
+            {
+                "label": "1080p or lower",
+                "format": "(bv[height<=1080][ext=mp4][container=mp4_dash]+139)/(bv[height<=1080][ext=mp4][container=mp4_dash]+140)/(bv[height<=1080][ext=mp4]+ba[ext=m4a])/best[height<=1080][ext=mp4]/best[height<=1080]/best",
+            },
+            {
+                "label": "720p or lower",
+                "format": "(bv[height<=720][ext=mp4][container=mp4_dash]+139)/(bv[height<=720][ext=mp4][container=mp4_dash]+140)/(bv[height<=720][ext=mp4]+ba[ext=m4a])/best[height<=720][ext=mp4]/best[height<=720]/best",
+            },
+            {
+                "label": "480p or lower",
+                "format": "(bv[height<=480][ext=mp4][container=mp4_dash]+139)/(bv[height<=480][ext=mp4][container=mp4_dash]+140)/(bv[height<=480][ext=mp4]+ba[ext=m4a])/best[height<=480][ext=mp4]/best[height<=480]/best",
+            },
+            {
+                "label": "Audio only",
+                "format": "140/139/ba[ext=m4a]/ba",
+            },
+        ]
 
     # Method to handle appearing the Quality_comboBox data with available video qualities
     def Handle_quality_formats(self, formats, duration_seconds):
