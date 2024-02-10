@@ -4,8 +4,6 @@ import yt_dlp
 from PyQt5.QtCore import QThread, pyqtSignal
 
 
-# DownloadInfoThread extracts video info before downloading.
-# It sends title, duration, thumbnail bytes, and available quality options to MainApp.
 class DownloadInfoThread(QThread):
     vidoes_info = pyqtSignal(dict)
     info_failed = pyqtSignal(str)
@@ -113,7 +111,7 @@ class DownloadInfoThread(QThread):
             "total_duration_text": self.format_duration(total_duration_seconds),
             "thumbnail_data": thumbnail_data,
             "entries": playlist_entries,
-            "quality_items": self.Build_playlist_quality_items(),
+            "quality_items": self.Handle_playlist_quality_items(),
         }
 
     def get_thumbnail(self, thumbnail_url):
@@ -133,7 +131,6 @@ class DownloadInfoThread(QThread):
             return int(format_info["filesize_approx"])
 
         if "tbr" in format_info and format_info["tbr"] and duration_seconds:
-            # tbr is in Kbits/s
             return int((float(format_info["tbr"]) * 1000 / 8) * float(duration_seconds))
 
         return 0
@@ -154,14 +151,13 @@ class DownloadInfoThread(QThread):
 
         hours = total // 3600
         minutes = (total % 3600) // 60
-        # secs = total - (hours * 3600 )+( minutes & 60 ) 
         secs = total % 60
 
         if hours > 0:
             return f"{hours:02d}:{minutes:02d}:{secs:02d}"
         return f"{minutes:02d}:{secs:02d}"
 
-    def Build_playlist_quality_items(self):
+    def Handle_playlist_quality_items(self):
         return [
             {
                 "label": "Best available",
@@ -185,13 +181,10 @@ class DownloadInfoThread(QThread):
             },
         ]
 
-    # Method to handle appearing the Quality_comboBox data with available video qualities
     def Handle_quality_formats(self, formats, duration_seconds):
         quality_items = []
-        # Filter formats to include only mp4 and m4a with dash containers 
         filtered_formats = [format_info for format_info in formats if (format_info.get("ext") in ["mp4", "m4a"]) and (format_info.get("container") in ["mp4_dash", "m4a_dash"])]
 
-        # fallback when container key is missing in some extractors
         if len(filtered_formats) == 0:
             filtered_formats = [format_info for format_info in formats if (format_info.get("ext") in ["mp4", "m4a"])]
 
@@ -205,23 +198,18 @@ class DownloadInfoThread(QThread):
 
             label = f"{i+1}. {resolution:<9} - {extenstion:<4} - {filesize/1024/1024:.3f} MB"
 
-            # Build download format code (close to old Handle_options style)
             acodec = str(format_info.get("acodec", "none"))
             has_audio = acodec != "none"
             height = format_info.get("height")
             format_code = ""
             
-            # audio-only  
             if resolution == "audio only":
                 format_code = f"{format_id}/139/140/ba[ext=m4a]/ba"
-            # full video row already has audio (progressive)
             elif has_audio:
                 format_code = format_id
                 label = f"{label} (video+audio)"
-            #  merge selected video with preferred audio chain
             else:
                 if height:
-                    # try selected id first, then nearest mp4 dash with same/lower height
                     format_code = (
                         f"({format_id}+139)/"
                         f"({format_id}+ba[ext=m4a])/"
@@ -235,7 +223,6 @@ class DownloadInfoThread(QThread):
 
             quality_items.append({"label": label, "format": format_code})
 
-        # always add stable presets 
         quality_items.append({
             "label": "Best",
             "format": "(bv[ext=mp4][container=mp4_dash]+139)/(bv[ext=mp4][container=mp4_dash]+140)/(bv[ext=mp4]+ba[ext=m4a])/best[ext=mp4]/best",

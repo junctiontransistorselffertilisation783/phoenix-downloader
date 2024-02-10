@@ -4,10 +4,7 @@ import yt_dlp
 from yt_dlp.utils import DownloadCancelled
 from PyQt5.QtCore import QThread, pyqtSignal
 
-# DownloadingThread runs yt-dlp in background to keep the GUI responsive.
-# It emits progress, status, success, and error signals back to MainApp.
 class DownloadingThread(QThread):
-    # Signals to update GUI from the thread
     progress_changed = pyqtSignal(int)
     status_changed = pyqtSignal(str)
     details_changed = pyqtSignal(str)
@@ -15,20 +12,36 @@ class DownloadingThread(QThread):
     download_failed = pyqtSignal(str)
     download_cancelled = pyqtSignal()
 
-    def __init__(self, url, save_dir, quality, download_type="video", playlist_title=""):
+    def __init__(self, url, save_dir, quality, download_type="video", playlist_title="", download_subtitles=False):
         super().__init__()
         self.url = url
         self.save_dir = save_dir
         self.quality = quality
         self.download_type = download_type
         self.playlist_title = playlist_title
+        self.download_subtitles = download_subtitles
         self.stop_requested = False
 
     def Cancel_download(self):
         self.stop_requested = True
 
+    def Handle_num(self, value):
+        if value is None:
+            return 0
+
+        try:
+            number_value = float(value)
+        except (TypeError, ValueError):
+            return 0
+
+        if number_value < 0:
+            return 0
+
+        return number_value
+
     def Format_bytes(self, byte_count):
-        if byte_count is None or byte_count <= 0:
+        byte_count = self.Handle_num(byte_count)
+        if byte_count <= 0:
             return ""
 
         units = ["B", "KB", "MB", "GB"]
@@ -44,15 +57,8 @@ class DownloadingThread(QThread):
         return ""
 
     def Format_seconds(self, seconds):
-        if seconds is None:
-            return ""
-
-        try:
-            total_seconds = int(seconds)
-        except (TypeError, ValueError):
-            return ""
-
-        if total_seconds < 0:
+        total_seconds = int(self.Handle_num(seconds))
+        if total_seconds <= 0:
             return ""
 
         minutes, secs = divmod(total_seconds, 60)
@@ -74,7 +80,52 @@ class DownloadingThread(QThread):
 
         return cleaned
 
-    # Handle selected quality and return yt-dlp format string
+    def Handle_subtitle_opts(self):
+        if not self.download_subtitles:
+            return {}
+
+        return {
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": ["en", "ar"],
+            "subtitlesformat": "srt/best",
+            "sleep_subtitles": 2,
+            "postprocessors": [{
+                "key": "FFmpegEmbedSubtitle",
+            }],
+        }
+
+    def Handle_ydl_opts(self, output_template, use_subtitles):
+        ydl_opts = {
+            "format": self.Handle_quality_format(),
+            "outtmpl": output_template,
+            "noplaylist": self.download_type != "playlist",
+            "progress_hooks": [self.progress_hook],
+            "quiet": True,
+            "no_warnings": True,
+            "continuedl": True,
+            "overwrites": False,
+        }
+
+        if use_subtitles:
+            ydl_opts.update(self.Handle_subtitle_opts())
+
+        if self.download_type == "playlist":
+            ydl_opts["ignoreerrors"] = True
+
+        return ydl_opts
+
+    def Handle_subtitle_error(self, error_text):
+        error_text = str(error_text).lower()
+        subtitle_words = [
+            "subtitle",
+            "subtitles",
+            "automatic captions",
+            "requested format not available",
+            "unable to download video subtitles",
+        ]
+        return any(word in error_text for word in subtitle_words)
+
     def Handle_quality_format(self):
         if ("+" in self.quality) or ("/" in self.quality) or ("[" in self.quality):
             return self.quality
@@ -114,20 +165,21 @@ class DownloadingThread(QThread):
             status = d.get("status", "")
 
         if status == "downloading":
-            if "downloaded_bytes" in d:
-                downloaded = d.get("downloaded_bytes", 0)
+            downloaded = self.Handle_num(d.get("downloaded_bytes", 0))
 
-            if "total_bytes" in d:
-                total_size = d["total_bytes"]
-            elif "total_bytes_estimate" in d:
-                total_size = d.get("total_bytes_estimate", 0)
+            total_bytes = d.get("total_bytes")
+            total_estimate = d.get("total_bytes_estimate")
+            if total_bytes is not None:
+                total_size = self.Handle_num(total_bytes)
+            elif total_estimate is not None:
+                total_size = self.Handle_num(total_estimate)
 
             if total_size > 0:
                 progress = int((downloaded / total_size) * 100)
                 self.progress_changed.emit(progress)
 
-            speed_value = d.get("speed")
-            eta_value = d.get("eta")
+            speed_value = self.Handle_num(d.get("speed"))
+            eta_value = self.Handle_num(d.get("eta"))
 
             if total_size <= 0 and downloaded > 0:
                 progress = 0
@@ -143,6 +195,9 @@ class DownloadingThread(QThread):
             eta_text = self.Format_seconds(eta_value)
 
             detail_parts = []
+            info_dict = d.get("info_dict", {})
+            ext_value = str(info_dict.get("ext", "")).lower()
+            is_subtitle_file = ext_value in ["vtt", "srt", "ttml", "sbv", "json"]
             if total_text and downloaded_text:
                 detail_parts.append(f"{downloaded_text} of {total_text}")
             elif downloaded_text:
@@ -155,12 +210,18 @@ class DownloadingThread(QThread):
                 detail_parts.append(f"ETA {eta_text}")
 
             status_prefix = "Downloading"
-            info_dict = d.get("info_dict", {})
             if self.download_type == "playlist":
                 playlist_index = info_dict.get("playlist_index")
                 playlist_count = info_dict.get("n_entries") or info_dict.get("playlist_count")
                 if playlist_index and playlist_count:
                     status_prefix = f"Item {playlist_index} of {playlist_count}"
+
+            title_text = str(info_dict.get("title", "")).strip()
+            if title_text:
+                detail_parts.insert(0, title_text)
+
+            if is_subtitle_file:
+                detail_parts.insert(0, "Subtitle file")
 
             self.status_changed.emit(f"{status_prefix}  {percent_value}%")
             self.details_changed.emit("   |   ".join(detail_parts) if detail_parts else "Receiving video data")
@@ -172,7 +233,6 @@ class DownloadingThread(QThread):
 
     def run(self):
         try:
-            selected_format = self.Handle_quality_format()
             self.status_changed.emit("Preparing download")
             self.details_changed.emit("Connecting to YouTube and preparing the selected format")
 
@@ -182,22 +242,20 @@ class DownloadingThread(QThread):
                 os.makedirs(playlist_folder, exist_ok=True)
                 output_template = os.path.join(playlist_folder, "%(playlist_index)03d - %(title)s.%(ext)s")
 
-            ydl_opts = {
-                "format": selected_format,
-                "outtmpl": output_template,
-                "noplaylist": self.download_type != "playlist",
-                "progress_hooks": [self.progress_hook],
-                "quiet": True,
-                "no_warnings": True,
-                "continuedl": True,
-                "overwrites": False,
-            }
+            ydl_opts = self.Handle_ydl_opts(output_template, self.download_subtitles)
 
-            if self.download_type == "playlist":
-                ydl_opts["ignoreerrors"] = True
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl: # pyright: ignore[reportArgumentType]
-                ydl.download([self.url])
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl: # pyright: ignore[reportArgumentType]
+                    ydl.download([self.url])
+            except Exception as error:
+                if self.download_subtitles and self.Handle_subtitle_error(str(error)):
+                    self.status_changed.emit("Retrying without subtitles")
+                    self.details_changed.emit("Subtitle failed, video will continue")
+                    retry_opts = self.Handle_ydl_opts(output_template, False)
+                    with yt_dlp.YoutubeDL(retry_opts) as ydl: # pyright: ignore[reportArgumentType]
+                        ydl.download([self.url])
+                else:
+                    raise
 
             if self.stop_requested:
                 self.download_cancelled.emit()

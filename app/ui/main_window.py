@@ -57,13 +57,17 @@ class MainApp(QMainWindow):
 
         title_label = QLabel("Phoenix Downloader")
         title_font = QFont()
-        title_font.setPointSize(15)
+        title_font.setPointSize(14)
         title_font.setBold(True)
         title_label.setFont(title_font)
         main_layout.addWidget(title_label)
 
         url_row = QHBoxLayout()
         url_row.setSpacing(10)
+
+        url_label = QLabel("URL")
+        url_label.setFixedWidth(58)
+        url_row.addWidget(url_label)
 
         self.url_input = QComboBox()
         self.url_input.setEditable(True)
@@ -77,7 +81,7 @@ class MainApp(QMainWindow):
         self.url_completer.setCompletionMode(QCompleter.PopupCompletion)
         url_row.addWidget(self.url_input, 1)
 
-        self.get_info_btn = QPushButton("Load Video Info")
+        self.get_info_btn = QPushButton("Get Video Info")
         self.get_info_btn.clicked.connect(self.Handle_get_video_info)
         self.get_info_btn.setMinimumWidth(170)
         url_row.addWidget(self.get_info_btn)
@@ -85,6 +89,10 @@ class MainApp(QMainWindow):
 
         path_row = QHBoxLayout()
         path_row.setSpacing(10)
+
+        path_label = QLabel("Save To")
+        path_label.setFixedWidth(58)
+        path_row.addWidget(path_label)
 
         self.path_input = QComboBox()
         self.path_input.setEditable(True)
@@ -105,13 +113,14 @@ class MainApp(QMainWindow):
 
         options_row = QHBoxLayout()
         options_row.setSpacing(16)
+        options_row.setContentsMargins(58, 0, 0, 0)
 
         self.quality_wrap = QWidget()
         quality_layout = QVBoxLayout(self.quality_wrap)
         quality_layout.setContentsMargins(0, 0, 0, 0)
         quality_layout.setSpacing(6)
 
-        self.quality_label = QLabel("Video Quality")
+        self.quality_label = QLabel("Quality")
         quality_layout.addWidget(self.quality_label)
 
         self.quality_comboBox = QComboBox()
@@ -124,7 +133,7 @@ class MainApp(QMainWindow):
         playlist_action_layout.setContentsMargins(0, 0, 0, 0)
         playlist_action_layout.setSpacing(6)
 
-        playlist_action_label = QLabel("Playlist Download")
+        playlist_action_label = QLabel("Playlist")
         playlist_action_layout.addWidget(playlist_action_label)
 
         self.playlist_action_combo = QComboBox()
@@ -134,10 +143,15 @@ class MainApp(QMainWindow):
         self.playlist_action_combo.currentIndexChanged.connect(self.Handle_playlist_action_changed)
         playlist_action_layout.addWidget(self.playlist_action_combo)
         options_row.addWidget(self.playlist_action_wrap, 0, Qt.AlignLeft)
+
+        self.subtitle_checkBox = QCheckBox("Subtitles")
+        self.subtitle_checkBox.setMinimumHeight(34)
+        options_row.addWidget(self.subtitle_checkBox, 0, Qt.AlignBottom)
+
         options_row.addStretch()
         main_layout.addLayout(options_row)
 
-        self.info_group = QGroupBox("Loaded Media")
+        self.info_group = QGroupBox("Video Info")
         info_layout = QVBoxLayout(self.info_group)
         info_layout.setContentsMargins(14, 12, 14, 14)
         info_layout.setSpacing(12)
@@ -196,11 +210,7 @@ class MainApp(QMainWindow):
         info_layout.addLayout(media_top_row)
         main_layout.addWidget(self.info_group)
 
-        progress_label = QLabel("Download Info")
-        progress_label.setStyleSheet("color: #444; font-size: 10pt;")
-        main_layout.addWidget(progress_label)
-
-        progress_group = QGroupBox("Download Progress")
+        progress_group = QGroupBox("Download Info")
         progress_layout = QVBoxLayout(progress_group)
         progress_layout.setContentsMargins(14, 12, 14, 14)
         progress_layout.setSpacing(8)
@@ -266,6 +276,7 @@ class MainApp(QMainWindow):
         self.browse_btn.setEnabled(enabled)
         self.quality_comboBox.setEnabled(enabled)
         self.playlist_action_combo.setEnabled(enabled)
+        self.subtitle_checkBox.setEnabled(enabled)
         self.playlist_preview_list.setEnabled(enabled)
 
     def Get_url_text(self):
@@ -484,10 +495,15 @@ class MainApp(QMainWindow):
         if action == "playlist":
             self.Load_quality_items(self.playlist_policy_quality_items, ["720p", "Best"])
             self.progress_details_label.setText("The whole playlist will be saved inside its own folder")
+            self.downloadButton.setEnabled(len(self.playlist_entries) > 0)
         else:
             if self.selected_playlist_entry:
                 entry_quality_items = self.selected_playlist_entry.get("quality_items", [])
                 self.Load_quality_items(entry_quality_items, ["720p", "Best"])
+                self.downloadButton.setEnabled(self.selected_playlist_entry.get("is_available", False) and len(entry_quality_items) > 0)
+            else:
+                self.quality_comboBox.clear()
+                self.downloadButton.setEnabled(False)
             self.progress_details_label.setText("The selected playlist video will be downloaded")
 
         self.Update_download_button_text()
@@ -507,11 +523,13 @@ class MainApp(QMainWindow):
 
         entry = self.playlist_entries[selected_index]
         self.selected_playlist_entry = entry
-        self.playlist_selected_value.setText(f"Selected Video: {entry.get('index', 0):02d} - {entry.get('title', '-')}")
+        total_entries = len(self.playlist_entries)
+        self.playlist_selected_value.setText(f"Selected Video: {entry.get('index', 0):02d}/{total_entries:02d} - {entry.get('title', '-')}")
 
         if self.playlist_action_combo.currentData() == "selected":
             entry_quality_items = entry.get("quality_items", [])
             self.Load_quality_items(entry_quality_items, ["720p", "Best"])
+            self.downloadButton.setEnabled(entry.get("is_available", False) and len(entry_quality_items) > 0)
 
     def Handle_playlist_action_changed(self):
         self.Refresh_playlist_quality_mode()
@@ -570,7 +588,6 @@ class MainApp(QMainWindow):
             self.playlist_total_duration_value.setText(f"Total Duration: {total_duration_text}")
             self.Populate_playlist_entries(self.playlist_entries)
             self.Refresh_playlist_quality_mode()
-            self.downloadButton.setEnabled(len(self.playlist_entries) > 0)
             self.status_label.setText("Playlist info loaded")
             self.progress_details_label.setText("Choose selected video or full playlist, then start download")
         else:
@@ -656,7 +673,7 @@ class MainApp(QMainWindow):
         self.Set_download_controls(True)
         self.Set_inputs_enabled(False)
 
-        self.download_thread = DownloadingThread(download_url, save_dir, quality, download_type, playlist_title)
+        self.download_thread = DownloadingThread(download_url, save_dir, quality, download_type, playlist_title, self.subtitle_checkBox.isChecked())
         self.download_thread.progress_changed.connect(self.Update_progress)
         self.download_thread.status_changed.connect(self.Update_status)
         self.download_thread.details_changed.connect(self.Update_progress_details)
