@@ -3,6 +3,7 @@ import os
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled
 from PyQt5.QtCore import QThread, pyqtSignal
+from app.utils.helpers import handle_num, format_bytes, format_seconds, safe_name
 
 class DownloadingThread(QThread):
     progress_changed = pyqtSignal(int)
@@ -24,61 +25,6 @@ class DownloadingThread(QThread):
 
     def Cancel_download(self):
         self.stop_requested = True
-
-    def Handle_num(self, value):
-        if value is None:
-            return 0
-
-        try:
-            number_value = float(value)
-        except (TypeError, ValueError):
-            return 0
-
-        if number_value < 0:
-            return 0
-
-        return number_value
-
-    def Format_bytes(self, byte_count):
-        byte_count = self.Handle_num(byte_count)
-        if byte_count <= 0:
-            return ""
-
-        units = ["B", "KB", "MB", "GB"]
-        value = float(byte_count)
-
-        for unit in units:
-            if value < 1024 or unit == units[-1]:
-                if unit == "B":
-                    return f"{int(value)} {unit}"
-                return f"{value:.1f} {unit}"
-            value /= 1024
-
-        return ""
-
-    def Format_seconds(self, seconds):
-        total_seconds = int(self.Handle_num(seconds))
-        if total_seconds <= 0:
-            return ""
-
-        minutes, secs = divmod(total_seconds, 60)
-        hours, minutes = divmod(minutes, 60)
-
-        if hours > 0:
-            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-
-        return f"{minutes:02d}:{secs:02d}"
-
-    def Safe_name(self, text):
-        cleaned = str(text).strip()
-        for char in '<>:"/\\|?*':
-            cleaned = cleaned.replace(char, "_")
-
-        cleaned = " ".join(cleaned.split())
-        if cleaned == "":
-            return "playlist"
-
-        return cleaned
 
     def Handle_subtitle_opts(self):
         if not self.download_subtitles:
@@ -165,21 +111,21 @@ class DownloadingThread(QThread):
             status = d.get("status", "")
 
         if status == "downloading":
-            downloaded = self.Handle_num(d.get("downloaded_bytes", 0))
+            downloaded = handle_num(d.get("downloaded_bytes", 0))
 
             total_bytes = d.get("total_bytes")
             total_estimate = d.get("total_bytes_estimate")
             if total_bytes is not None:
-                total_size = self.Handle_num(total_bytes)
+                total_size = handle_num(total_bytes)
             elif total_estimate is not None:
-                total_size = self.Handle_num(total_estimate)
+                total_size = handle_num(total_estimate)
 
             if total_size > 0:
                 progress = int((downloaded / total_size) * 100)
                 self.progress_changed.emit(progress)
 
-            speed_value = self.Handle_num(d.get("speed"))
-            eta_value = self.Handle_num(d.get("eta"))
+            speed_value = handle_num(d.get("speed"))
+            eta_value = handle_num(d.get("eta"))
 
             if total_size <= 0 and downloaded > 0:
                 progress = 0
@@ -189,10 +135,10 @@ class DownloadingThread(QThread):
             if total_size > 0:
                 percent_value = int((downloaded / total_size) * 100)
 
-            downloaded_text = self.Format_bytes(downloaded)
-            total_text = self.Format_bytes(total_size)
-            speed_text = self.Format_bytes(speed_value)
-            eta_text = self.Format_seconds(eta_value)
+            downloaded_text = format_bytes(downloaded)
+            total_text = format_bytes(total_size)
+            speed_text = format_bytes(speed_value)
+            eta_text = format_seconds(eta_value)
 
             detail_parts = []
             info_dict = d.get("info_dict", {})
@@ -238,7 +184,7 @@ class DownloadingThread(QThread):
 
             output_template = os.path.join(self.save_dir, "%(title)s.%(ext)s")
             if self.download_type == "playlist":
-                playlist_folder = os.path.join(self.save_dir, self.Safe_name(self.playlist_title))
+                playlist_folder = os.path.join(self.save_dir, safe_name(self.playlist_title))
                 os.makedirs(playlist_folder, exist_ok=True)
                 output_template = os.path.join(playlist_folder, "%(playlist_index)03d - %(title)s.%(ext)s")
 

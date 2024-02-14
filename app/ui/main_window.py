@@ -6,9 +6,10 @@ from PyQt5.QtWidgets import *
 
 from app.threads.download_thread import DownloadingThread
 from app.threads.get_info_thread import DownloadInfoThread
+from app.ui.ui_downloader import Ui_MainWindow
 
 
-class MainApp(QMainWindow):
+class MainApp(QMainWindow, Ui_MainWindow):
     def __init__(self):
         super().__init__()
         self.download_thread = None
@@ -20,244 +21,154 @@ class MainApp(QMainWindow):
         self.playlist_title = ""
         self.playlist_policy_quality_items = []
         self.selected_playlist_entry = None
+        self.default = True
         self.settings = QSettings("PhoenixDownloader", "PhoenixDownloaderApp")
-        self.setWindowTitle("Phoenix Downloader")
-        self.resize(930, 710)
-        self.setMinimumSize(900, 660)
         self.init_ui()
         self.Load_saved_data()
         self.Reset_video_info()
 
     def init_ui(self):
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        self.setupUi(self)
 
-        app = QApplication.instance()
-        if app is not None:
-            app.setStyle(QStyleFactory.create("Fusion"))
+        self.url_input = self.url_line
+        self.path_input = self.location_line
+        self.get_info_btn = self.searchButton
+        self.browse_btn = self.browseButton
+        self.quality_comboBox = self.Quality_comboBox
+        self.subtitle_checkBox = self.Subtitles_checkBox
+        self.thumbnail_label = self.Thumbnail_label
+        self.status_label = self.Display_videoName
+        self.progress_details_label = self.label_4
 
-        self.setStyleSheet(
-            "QWidget { font-size: 11pt; }"
-            "QLineEdit, QComboBox, QListWidget, QPushButton { min-height: 36px; }"
-            "QPushButton { padding: 6px 14px; border: 1px solid #b9b9b9; border-radius: 7px; background: #f8f8f8; }"
-            "QPushButton:hover { background: #f1f1f1; }"
-            "QPushButton:disabled { color: #888; background: #f1f1f1; }"
-            "QComboBox, QLineEdit, QListWidget { border: 1px solid #bfbfbf; border-radius: 6px; background: white; }"
-            "QComboBox { padding: 4px 34px 4px 10px; }"
-            "QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right; width: 28px; border-left: 1px solid #d8d8d8; }"
-            "QLineEdit { padding: 4px 10px; }"
-            "QListWidget { padding: 4px; }"
-            "QGroupBox { font-weight: 600; border: 1px solid #c8c8c8; border-radius: 6px; margin-top: 12px; padding-top: 14px; }"
-            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }"
+        self.quality_label = self.label_3
+        self.info_group = self.Thumbnail_label
+
+        self.playlist_action_wrap = QWidget(self.centralwidget)
+        self.playlist_action_wrap.setVisible(False)
+        self.playlist_action_combo = QComboBox(self.playlist_action_wrap)
+        self.playlist_action_combo.addItem("Download selected video", "selected")
+        self.playlist_action_combo.addItem("Download full playlist", "playlist")
+
+        self.playlist_preview_list = QListWidget(self.centralwidget)
+        self.playlist_preview_list.setGeometry(QRect(630, 180, 255, 182))
+        self.playlist_preview_list.hide()
+
+        self.info_type_label = QLabel(self.centralwidget)
+        self.video_title_label = QLabel(self.centralwidget)
+        self.video_duration_label = QLabel(self.centralwidget)
+        self.info_hint_label = QLabel(self.centralwidget)
+        self.playlist_count_value = QLabel(self.centralwidget)
+        self.playlist_total_duration_value = QLabel(self.centralwidget)
+        self.playlist_selected_value = QLabel(self.centralwidget)
+
+        self.cancelButton = QPushButton("Cancel", self.centralwidget)
+        self.cancelButton.setGeometry(QRect(390, 470, 170, 36))
+        self.cancelButton.hide()
+
+        btn_font = QFont()
+        btn_font.setPointSize(11)
+        btn_font.setBold(True)
+        self.downloadButton.setFont(btn_font)
+        self.downloadButton.setGeometry(QRect(390, 470, 170, 36))
+        self.cancelButton.setFont(btn_font)
+
+        self.downloadButton.setStyleSheet(
+            "QPushButton:disabled {"
+            " background-color: #3a4556;"
+            " color: #8f9aaa;"
+            "}"
         )
 
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(18, 14, 18, 16)
-        main_layout.setSpacing(12)
+        status_font = QFont()
+        status_font.setPointSize(10)
+        status_font.setBold(False)
+        self.status_label.setFont(status_font)
 
-        title_label = QLabel("Phoenix Downloader")
-        title_font = QFont()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        main_layout.addWidget(title_label)
+        self.downloadButton.clicked.connect(self.Handle_download)
+        self.cancelButton.clicked.connect(self.Handle_cancel_download)
+        self.searchButton.pressed.connect(self.Defulat_fun)
+        self.get_info_btn.clicked.connect(self.Handle_get_video_info)
+        self.browse_btn.clicked.connect(self.Handle_location)
+        self.playlist_action_combo.currentIndexChanged.connect(self.Handle_playlist_action_changed)
+        self.playlist_preview_list.itemSelectionChanged.connect(self.Handle_playlist_selection)
+        self.AdvancedOptions_checkBox.clicked.connect(self.Adv_UI_Setup)
+        self.Plst_Range_checkBox.clicked.connect(self.Adv_UI_Setup)
+        self.Add_Prefix_checkBox.clicked.connect(self.Adv_UI_Setup)
+        self.Add_Suffix_checkBox.clicked.connect(self.Adv_UI_Setup)
+        self.Range_save_pushButton.clicked.connect(self.Adv_UI_Setup)
 
-        url_row = QHBoxLayout()
-        url_row.setSpacing(10)
-
-        url_label = QLabel("URL")
-        url_label.setFixedWidth(58)
-        url_row.addWidget(url_label)
-
-        self.url_input = QComboBox()
-        self.url_input.setEditable(True)
-        self.url_input.setInsertPolicy(QComboBox.NoInsert)
-        self.url_input.setMaxVisibleItems(10)
-        self.url_input.lineEdit().setPlaceholderText("Enter or paste YouTube URL here")
         self.url_input.lineEdit().returnPressed.connect(self.Handle_get_video_info)
         self.url_input.editTextChanged.connect(self.Handle_url_text_changed)
         self.url_completer = self.url_input.completer()
         self.url_completer.setCaseSensitivity(Qt.CaseInsensitive)
         self.url_completer.setCompletionMode(QCompleter.PopupCompletion)
-        url_row.addWidget(self.url_input, 1)
 
-        self.get_info_btn = QPushButton("Get Video Info")
-        self.get_info_btn.clicked.connect(self.Handle_get_video_info)
-        self.get_info_btn.setMinimumWidth(170)
-        url_row.addWidget(self.get_info_btn)
-        main_layout.addLayout(url_row)
-
-        path_row = QHBoxLayout()
-        path_row.setSpacing(10)
-
-        path_label = QLabel("Save To")
-        path_label.setFixedWidth(58)
-        path_row.addWidget(path_label)
-
-        self.path_input = QComboBox()
-        self.path_input.setEditable(True)
-        self.path_input.setInsertPolicy(QComboBox.NoInsert)
-        self.path_input.setMaxVisibleItems(10)
         self.path_input.lineEdit().setPlaceholderText("Select download folder")
         self.path_input.setCurrentText(self.Get_default_folder())
         self.path_completer = self.path_input.completer()
         self.path_completer.setCaseSensitivity(Qt.CaseInsensitive)
         self.path_completer.setCompletionMode(QCompleter.PopupCompletion)
-        path_row.addWidget(self.path_input, 1)
 
-        self.browse_btn = QPushButton("Browse")
-        self.browse_btn.clicked.connect(self.Handle_location)
-        self.browse_btn.setMinimumWidth(120)
-        path_row.addWidget(self.browse_btn)
-        main_layout.addLayout(path_row)
-
-        options_row = QHBoxLayout()
-        options_row.setSpacing(16)
-        options_row.setContentsMargins(58, 0, 0, 0)
-
-        self.quality_wrap = QWidget()
-        quality_layout = QVBoxLayout(self.quality_wrap)
-        quality_layout.setContentsMargins(0, 0, 0, 0)
-        quality_layout.setSpacing(6)
-
-        self.quality_label = QLabel("Quality")
-        quality_layout.addWidget(self.quality_label)
-
-        self.quality_comboBox = QComboBox()
-        self.quality_comboBox.setMinimumWidth(390)
-        quality_layout.addWidget(self.quality_comboBox)
-        options_row.addWidget(self.quality_wrap, 0, Qt.AlignLeft)
-
-        self.playlist_action_wrap = QWidget()
-        playlist_action_layout = QVBoxLayout(self.playlist_action_wrap)
-        playlist_action_layout.setContentsMargins(0, 0, 0, 0)
-        playlist_action_layout.setSpacing(6)
-
-        playlist_action_label = QLabel("Playlist")
-        playlist_action_layout.addWidget(playlist_action_label)
-
-        self.playlist_action_combo = QComboBox()
-        self.playlist_action_combo.setMinimumWidth(290)
-        self.playlist_action_combo.addItem("Download selected video", "selected")
-        self.playlist_action_combo.addItem("Download full playlist", "playlist")
-        self.playlist_action_combo.currentIndexChanged.connect(self.Handle_playlist_action_changed)
-        playlist_action_layout.addWidget(self.playlist_action_combo)
-        options_row.addWidget(self.playlist_action_wrap, 0, Qt.AlignLeft)
-
-        self.subtitle_checkBox = QCheckBox("Subtitles")
-        self.subtitle_checkBox.setMinimumHeight(34)
-        options_row.addWidget(self.subtitle_checkBox, 0, Qt.AlignBottom)
-
-        options_row.addStretch()
-        main_layout.addLayout(options_row)
-
-        self.info_group = QGroupBox("Video Info")
-        info_layout = QVBoxLayout(self.info_group)
-        info_layout.setContentsMargins(14, 12, 14, 14)
-        info_layout.setSpacing(12)
-
-        media_top_row = QHBoxLayout()
-        media_top_row.setSpacing(16)
-
-        self.thumbnail_label = QLabel()
-        self.thumbnail_label.setFixedSize(500, 282)
-        self.thumbnail_label.setAlignment(Qt.AlignCenter)
-        self.thumbnail_label.setStyleSheet("border: 1px solid #bfbfbf; border-radius: 6px; background: #f2f2f2;")
-        media_top_row.addWidget(self.thumbnail_label, 0, Qt.AlignTop)
-
-        media_text_col = QVBoxLayout()
-        media_text_col.setSpacing(10)
-
-        self.info_type_label = QLabel("")
-        self.info_type_label.setStyleSheet("font-weight: 600; color: #555;")
-        media_text_col.addWidget(self.info_type_label)
-
-        self.video_title_label = QLabel("")
-        self.video_title_label.setWordWrap(True)
-        title_font2 = QFont()
-        title_font2.setPointSize(13)
-        title_font2.setBold(True)
-        self.video_title_label.setFont(title_font2)
-        media_text_col.addWidget(self.video_title_label)
-
-        self.video_duration_label = QLabel("")
-        self.video_duration_label.setWordWrap(True)
-        media_text_col.addWidget(self.video_duration_label)
-
-        self.info_hint_label = QLabel("")
-        self.info_hint_label.setWordWrap(True)
-        self.info_hint_label.setStyleSheet("color: #555;")
-        media_text_col.addWidget(self.info_hint_label)
-
-        self.playlist_count_value = QLabel("")
-        media_text_col.addWidget(self.playlist_count_value)
-
-        self.playlist_total_duration_value = QLabel("")
-        media_text_col.addWidget(self.playlist_total_duration_value)
-
-        self.playlist_selected_value = QLabel("")
-        self.playlist_selected_value.setWordWrap(True)
-        media_text_col.addWidget(self.playlist_selected_value)
-
-        self.playlist_preview_list = QListWidget()
-        self.playlist_preview_list.setMinimumHeight(230)
-        self.playlist_preview_list.itemSelectionChanged.connect(self.Handle_playlist_selection)
-        media_text_col.addWidget(self.playlist_preview_list, 1)
-
-        media_text_col.addStretch()
-
-        media_top_row.addLayout(media_text_col, 1)
-        info_layout.addLayout(media_top_row)
-        main_layout.addWidget(self.info_group)
-
-        progress_group = QGroupBox("Download Info")
-        progress_layout = QVBoxLayout(progress_group)
-        progress_layout.setContentsMargins(14, 12, 14, 14)
-        progress_layout.setSpacing(8)
-
-        self.status_label = QLabel("Ready")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        status_font = QFont()
-        status_font.setBold(True)
-        self.status_label.setFont(status_font)
-        progress_layout.addWidget(self.status_label)
-
-        self.progressBar = QProgressBar()
-        self.progressBar.setRange(0, 100)
-        self.progressBar.setValue(0)
-        self.progressBar.setTextVisible(True)
-        self.progressBar.setFormat("%p%")
-        self.progressBar.setAlignment(Qt.AlignCenter)
-        self.progressBar.setMinimumHeight(26)
-        progress_layout.addWidget(self.progressBar)
-
-        self.progress_details_label = QLabel("")
-        self.progress_details_label.setAlignment(Qt.AlignCenter)
-        self.progress_details_label.setWordWrap(True)
-        self.progress_details_label.setStyleSheet("color: #555;")
-        progress_layout.addWidget(self.progress_details_label)
-        main_layout.addWidget(progress_group)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch()
-
-        self.downloadButton = QPushButton("Download Video")
-        self.downloadButton.clicked.connect(self.Handle_download)
         self.downloadButton.setEnabled(False)
-        self.downloadButton.setMinimumWidth(240)
-        self.downloadButton.setMinimumHeight(42)
-        button_row.addWidget(self.downloadButton)
 
-        self.cancelButton = QPushButton("Cancel Download")
-        self.cancelButton.clicked.connect(self.Handle_cancel_download)
-        self.cancelButton.setEnabled(False)
-        self.cancelButton.setMinimumWidth(240)
-        self.cancelButton.setMinimumHeight(42)
-        self.cancelButton.hide()
-        button_row.addWidget(self.cancelButton)
+        self.playlist_num_display.hide()
+        self.Playlist_comboBox.hide()
+        self.Plst_Range_frame.hide()
+        self.Suffix_lineEdit.hide()
+        self.label_4.hide()
+        self.v_options_groupBox.hide()
+        self.plst_options_groupBox.hide()
+        self.prefix_no_cmbx.show()
 
-        button_row.addStretch()
-        main_layout.addLayout(button_row)
+    def Defulat_fun(self):
+        self.default = False
+        self.Playlist_comboBox.setCurrentIndex(0)
+
+    def Adv_UI_Setup(self):
+        checkbox = self.sender()
+
+        if checkbox == self.AdvancedOptions_checkBox:
+            if self.AdvancedOptions_checkBox.isChecked():
+                self.v_options_groupBox.show()
+                self.plst_options_groupBox.show()
+                self.line.hide()
+                self.resize(self.width(), self.height() + 150)
+            else:
+                self.v_options_groupBox.hide()
+                self.plst_options_groupBox.hide()
+                self.line.show()
+                self.resize(self.width(), self.height() - 150)
+
+        elif checkbox == self.Plst_Range_checkBox:
+            if self.Plst_Range_checkBox.isChecked():
+                self.Plst_Range_frame.show()
+                self.CurrentVideo_checkBox.hide()
+            else:
+                self.Plst_Range_frame.hide()
+                self.CurrentVideo_checkBox.show()
+
+        elif checkbox == self.Range_save_pushButton:
+            start = self.Range_start_spnbx.value()
+            end = self.Range_end_spnbx.value()
+            if end >= start:
+                self.Items_Range_cmbx.insertItem(0, f"{start}-{end}")
+                self.Items_Range_cmbx.setCurrentIndex(0)
+
+        elif checkbox == self.Add_Prefix_checkBox:
+            if self.Add_Prefix_checkBox.isChecked():
+                self.prefix_no_cmbx.show()
+                self.Add_Prefix_checkBox.setText("Add")
+            else:
+                self.prefix_no_cmbx.hide()
+                self.Add_Prefix_checkBox.setText("Add Prefix-Plst_No")
+
+        elif checkbox == self.Add_Suffix_checkBox:
+            if self.Add_Suffix_checkBox.isChecked():
+                self.Suffix_lineEdit.show()
+                self.Add_Suffix_checkBox.setText("")
+            else:
+                self.Suffix_lineEdit.hide()
+                self.Add_Suffix_checkBox.setText("Add Suffix")
 
     def Set_download_controls(self, downloading):
         if downloading:
@@ -412,7 +323,6 @@ class MainApp(QMainWindow):
             self.playlist_total_duration_value.show()
             self.playlist_selected_value.show()
             self.quality_label.setText("Quality")
-            self.resize(max(self.width(), 1120), max(self.height(), 800))
         elif info_type == "video":
             self.playlist_action_wrap.hide()
             self.playlist_preview_list.hide()
@@ -420,14 +330,12 @@ class MainApp(QMainWindow):
             self.playlist_total_duration_value.hide()
             self.playlist_selected_value.hide()
             self.quality_label.setText("Quality")
-            self.resize(930, 710)
         else:
             self.playlist_action_wrap.hide()
             self.playlist_preview_list.hide()
             self.playlist_count_value.hide()
             self.playlist_total_duration_value.hide()
             self.playlist_selected_value.hide()
-            self.resize(930, 710)
 
     def Update_download_button_text(self):
         if self.current_info_type == "playlist":

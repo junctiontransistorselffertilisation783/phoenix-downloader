@@ -2,6 +2,7 @@ import requests
 
 import yt_dlp
 from PyQt5.QtCore import QThread, pyqtSignal
+from app.utils.helpers import format_duration_unknown
 
 
 class DownloadInfoThread(QThread):
@@ -37,7 +38,7 @@ class DownloadInfoThread(QThread):
     def video_info(self, info_dict):
         title = str(info_dict.get("title", "Unknown title"))
         duration_seconds = info_dict.get("duration", 0)
-        duration_text = self.format_duration(duration_seconds)
+        duration_text = format_duration_unknown(duration_seconds)
         uploader = str(info_dict.get("uploader") or info_dict.get("channel") or "Unknown channel")
 
         thumbnail_data = None
@@ -96,7 +97,7 @@ class DownloadInfoThread(QThread):
             playlist_entries.append({
                 "index": i + 1,
                 "title": str(entry.get("title", f"Video {i+1}")),
-                "duration_text": self.format_duration(duration_seconds),
+                "duration_text": format_duration_unknown(duration_seconds),
                 "duration_seconds": duration_seconds or 0,
                 "webpage_url": str(webpage_url),
                 "is_available": bool(webpage_url),
@@ -108,7 +109,7 @@ class DownloadInfoThread(QThread):
             "title": title,
             "uploader": uploader,
             "playlist_count": playlist_count,
-            "total_duration_text": self.format_duration(total_duration_seconds),
+            "total_duration_text": format_duration_unknown(total_duration_seconds),
             "thumbnail_data": thumbnail_data,
             "entries": playlist_entries,
             "quality_items": self.Handle_playlist_quality_items(),
@@ -139,23 +140,6 @@ class DownloadInfoThread(QThread):
         if size_bytes <= 0:
             return "Unknown size"
         return f"{size_bytes / (1024 * 1024):.1f} MB"
-
-    def format_duration(self, seconds):
-        try:
-            total = int(seconds)
-        except Exception:
-            total = 0
-
-        if total <= 0:
-            return "Unknown"
-
-        hours = total // 3600
-        minutes = (total % 3600) // 60
-        secs = total % 60
-
-        if hours > 0:
-            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-        return f"{minutes:02d}:{secs:02d}"
 
     def Handle_playlist_quality_items(self):
         return [
