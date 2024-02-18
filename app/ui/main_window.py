@@ -21,6 +21,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.playlist_title = ""
         self.playlist_policy_quality_items = []
         self.selected_playlist_entry = None
+        self.current_video_language = "unknown"
         self.default = True
         self.settings = QSettings("PhoenixDownloader", "PhoenixDownloaderApp")
         self.init_ui()
@@ -351,6 +352,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.playlist_title = ""
         self.playlist_policy_quality_items = []
         self.selected_playlist_entry = None
+        self.current_video_language = "unknown"
         self.video_info_loaded = False
         self.Set_mode_layout("empty")
         self.info_group.hide()
@@ -483,6 +485,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.info_hint_label.clear()
 
         if info_type == "playlist":
+            self.current_video_language = "unknown"
             self.playlist_title = title
             self.playlist_entries = data.get("entries", [])
             self.playlist_policy_quality_items = data.get("quality_items", [])
@@ -501,14 +504,31 @@ class MainApp(QMainWindow, Ui_MainWindow):
         else:
             duration_text = data.get("duration_text", "-")
             quality_items = data.get("quality_items", [])
+            language = data.get("language", "unknown")
+            self.current_video_language = language
+            subtitle_profile = data.get("subtitle_profile", {})
+            has_subtitles = bool(subtitle_profile.get("has_any", False))
+            manual_count = int(subtitle_profile.get("manual_count", 0))
+            auto_count = int(subtitle_profile.get("auto_count", 0))
+            preferred_available = subtitle_profile.get("preferred_available", [])
 
             self.info_type_label.setText("Video")
             self.video_title_label.setText(title)
             self.video_duration_label.setText(f"Channel: {uploader}    |    Duration: {duration_text}")
             self.Load_quality_items(quality_items, ["720p", "Best"])
             self.downloadButton.setEnabled(self.quality_comboBox.count() > 0)
+            self.subtitle_checkBox.setEnabled(has_subtitles)
+            if not has_subtitles:
+                self.subtitle_checkBox.setChecked(False)
+
+            subtitle_hint = "Subtitles: none detected"
+            if has_subtitles:
+                subtitle_hint = f"Subtitles: manual={manual_count}, auto={auto_count}"
+                if preferred_available:
+                    subtitle_hint = subtitle_hint + f" | preferred found: {', '.join(preferred_available)}"
+
             self.status_label.setText("Video info loaded")
-            self.progress_details_label.setText("Choose quality and start download")
+            self.progress_details_label.setText(f"Choose quality and start download | lang={language} | {subtitle_hint}")
             self.Update_download_button_text()
 
     def Handle_info_failed(self, error_text):
@@ -581,7 +601,15 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.Set_download_controls(True)
         self.Set_inputs_enabled(False)
 
-        self.download_thread = DownloadingThread(download_url, save_dir, quality, download_type, playlist_title, self.subtitle_checkBox.isChecked())
+        self.download_thread = DownloadingThread(
+            download_url,
+            save_dir,
+            quality,
+            download_type,
+            playlist_title,
+            self.subtitle_checkBox.isChecked(),
+            self.current_video_language,
+        )
         self.download_thread.progress_changed.connect(self.Update_progress)
         self.download_thread.status_changed.connect(self.Update_status)
         self.download_thread.details_changed.connect(self.Update_progress_details)

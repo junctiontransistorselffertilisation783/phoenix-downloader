@@ -1,18 +1,66 @@
 from app.utils.helpers import format_duration_unknown
 
 
-def build_subtitle_opts(download_subtitles):
-    if not download_subtitles:
-        return {}
+def build_subtitle_profile(info_dict):
+    subtitles = info_dict.get("subtitles") or {}
+    auto_captions = info_dict.get("automatic_captions") or {}
+
+    manual_langs = sorted(list(subtitles.keys()))
+    auto_langs = sorted(list(auto_captions.keys()))
+
+    preferred_order = ["en", "en-orig", "ar"]
+    preferred_available = []
+    for lang in preferred_order:
+        if (lang in manual_langs) or (lang in auto_langs):
+            preferred_available.append(lang)
 
     return {
-        "writesubtitles": True,
-        "writeautomaticsub": True,
-        "subtitleslangs": ["en", "ar"],
+        "manual_langs": manual_langs,
+        "auto_langs": auto_langs,
+        "manual_count": len(manual_langs),
+        "auto_count": len(auto_langs),
+        "has_any": (len(manual_langs) > 0) or (len(auto_langs) > 0),
+        "preferred_available": preferred_available,
+    }
+
+
+def build_subtitle_languages(video_language):
+    lang = str(video_language or "").strip().lower()
+    if lang.startswith("ar"):
+        return ["ar.*", "en.*"]
+    return ["en.*", "ar.*"]
+
+
+def build_subtitle_passes(download_subtitles, video_language=""):
+    if not download_subtitles:
+        return []
+
+    subtitle_langs = build_subtitle_languages(video_language)
+
+    subtitle_base = {
+        "subtitleslangs": subtitle_langs,
         "subtitlesformat": "srt/best",
         "sleep_subtitles": 2,
-        "postprocessors": [{"key": "FFmpegEmbedSubtitle"}],
     }
+
+    return [
+        {
+            "name": "manual subtitles",
+            "options": {
+                **subtitle_base,
+                "writesubtitles": True,
+                "writeautomaticsub": False,
+            },
+        },
+        {
+            "name": "auto subtitles",
+            "options": {
+                **subtitle_base,
+                "writesubtitles": False,
+                "writeautomaticsub": True,
+            },
+        },
+    ]
 
 
 def build_quality_format(quality):
@@ -41,7 +89,7 @@ def build_quality_format(quality):
     return "(bv[ext=mp4][container=mp4_dash]+139)/(bv[ext=mp4]+ba[ext=m4a])/best[ext=mp4]/best"
 
 
-def build_download_opts(output_template, quality, download_type, use_subtitles, progress_hook):
+def build_download_options(output_template, quality, download_type, progress_hook):
     ydl_opts = {
         "format": build_quality_format(quality),
         "outtmpl": output_template,
@@ -52,9 +100,6 @@ def build_download_opts(output_template, quality, download_type, use_subtitles, 
         "continuedl": True,
         "overwrites": False,
     }
-
-    if use_subtitles:
-        ydl_opts.update(build_subtitle_opts(True))
 
     if download_type == "playlist":
         ydl_opts["ignoreerrors"] = True
@@ -72,6 +117,23 @@ def is_subtitle_error(error_text):
         "unable to download video subtitles",
     ]
     return any(word in error_text for word in subtitle_words)
+
+
+def build_subtitle_download_options(output_template, progress_hook, subtitle_options):
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": output_template,
+        "noplaylist": True,
+        "progress_hooks": [progress_hook],
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "ignoreerrors": True,
+        "continuedl": True,
+        "overwrites": False,
+    }
+    ydl_opts.update(subtitle_options)
+    return ydl_opts
 
 
 def get_size_bytes(format_info, duration_seconds):
@@ -173,16 +235,20 @@ def build_video_info(info_dict, thumbnail_data):
     duration_seconds = info_dict.get("duration", 0)
     duration_text = format_duration_unknown(duration_seconds)
     uploader = str(info_dict.get("uploader") or info_dict.get("channel") or "Unknown channel")
+    language = str(info_dict.get("language") or "unknown")
     formats = info_dict.get("formats", [])
     quality_items = build_quality_items(formats, duration_seconds)
+    subtitle_profile = build_subtitle_profile(info_dict)
 
     return {
         "info_type": "video",
         "title": title,
         "uploader": uploader,
+        "language": language,
         "duration_text": duration_text,
         "thumbnail_data": thumbnail_data,
         "quality_items": quality_items,
+        "subtitle_profile": subtitle_profile,
     }
 
 

@@ -4,7 +4,12 @@ import yt_dlp
 from yt_dlp.utils import DownloadCancelled
 from PyQt5.QtCore import QThread, pyqtSignal
 from app.utils.helpers import handle_num, format_bytes, format_seconds, safe_name
-from app.ytdlp.core import build_download_opts, is_subtitle_error
+from app.ytdlp.core import (
+    build_download_options,
+    build_subtitle_download_options,
+    build_subtitle_passes,
+    is_subtitle_error,
+)
 
 class DownloadingThread(QThread):
     progress_changed = pyqtSignal(int)
@@ -14,7 +19,16 @@ class DownloadingThread(QThread):
     download_failed = pyqtSignal(str)
     download_cancelled = pyqtSignal()
 
-    def __init__(self, url, save_dir, quality, download_type="video", playlist_title="", download_subtitles=False):
+    def __init__(
+        self,
+        url,
+        save_dir,
+        quality,
+        download_type="video",
+        playlist_title="",
+        download_subtitles=False,
+        video_language="",
+    ):
         super().__init__()
         self.url = url
         self.save_dir = save_dir
@@ -22,18 +36,25 @@ class DownloadingThread(QThread):
         self.download_type = download_type
         self.playlist_title = playlist_title
         self.download_subtitles = download_subtitles
+        self.video_language = video_language
         self.stop_requested = False
 
     def Cancel_download(self):
         self.stop_requested = True
 
-    def Handle_ydl_opts(self, output_template, use_subtitles):
-        return build_download_opts(
+    def Handle_ydl_opts(self, output_template):
+        return build_download_options(
             output_template=output_template,
             quality=self.quality,
             download_type=self.download_type,
-            use_subtitles=use_subtitles,
             progress_hook=self.progress_hook,
+        )
+
+    def Handle_subtitle_pass_options(self, output_template, subtitle_options):
+        return build_subtitle_download_options(
+            output_template=output_template,
+            progress_hook=self.progress_hook,
+            subtitle_options=subtitle_options,
         )
 
     def progress_hook(self, d):
@@ -116,6 +137,22 @@ class DownloadingThread(QThread):
             self.status_changed.emit("Finalizing file")
             self.details_changed.emit("Merging audio and video, then saving the final file")
 
+    def Cleanup_subtitle_orig_files(self, output_template):
+        template_dir = os.path.dirname(output_template)
+        if not os.path.isdir(template_dir):
+            return
+
+        try:
+            for name in os.listdir(template_dir):
+                file_name_lower = name.lower()
+                if file_name_lower.endswith("-orig.srt") or file_name_lower.endswith("-orig.vtt"):
+                    try:
+                        os.remove(os.path.join(template_dir, name))
+                    except Exception:
+                        continue
+        except Exception:
+            return
+
     def run(self):
         try:
             self.status_changed.emit("Preparing download")
@@ -127,20 +164,39 @@ class DownloadingThread(QThread):
                 os.makedirs(playlist_folder, exist_ok=True)
                 output_template = os.path.join(playlist_folder, "%(playlist_index)03d - %(title)s.%(ext)s")
 
-            ydl_opts = self.Handle_ydl_opts(output_template, self.download_subtitles)
+            ydl_opts = self.Handle_ydl_opts(output_template)
 
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl: # pyright: ignore[reportArgumentType]
-                    ydl.download([self.url])
-            except Exception as error:
-                if self.download_subtitles and is_subtitle_error(str(error)):
-                    self.status_changed.emit("Retrying without subtitles")
-                    self.details_changed.emit("Subtitle failed, video will continue")
-                    retry_opts = self.Handle_ydl_opts(output_template, False)
-                    with yt_dlp.YoutubeDL(retry_opts) as ydl: # pyright: ignore[reportArgumentType]
-                        ydl.download([self.url])
-                else:
-                    raise
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl: # pyright: ignore[reportArgumentType]
+                ydl.download([self.url])
+
+            if self.download_subtitles and not self.stop_requested:
+                subtitle_passes = build_subtitle_passes(self.download_subtitles, self.video_language)
+                subtitle_errors = []
+                for subtitle_pass in subtitle_passes:
+                    pass_name = subtitle_pass.get("name", "subtitles")
+                    subtitle_pass_options = subtitle_pass.get("options", {})
+                    if not subtitle_pass_options:
+                        continue
+
+                    self.status_changed.emit(f"Trying {pass_name}")
+                    self.details_changed.emit("Subtitle step is optional and will not stop video")
+
+                    subtitle_options = self.Handle_subtitle_pass_options(output_template, subtitle_pass_options)
+                    try:
+                        with yt_dlp.YoutubeDL(subtitle_options) as ydl: # pyright: ignore[reportArgumentType]
+                            ydl.download([self.url])
+                    except Exception as error:
+                        error_text = str(error)
+                        if is_subtitle_error(error_text):
+                            subtitle_errors.append(error_text)
+                            continue
+                        raise
+
+                if subtitle_errors:
+                    self.status_changed.emit("Download completed with subtitle warning")
+                    self.details_changed.emit("Some subtitle languages failed (e.g. rate limit), video is saved")
+
+                self.Cleanup_subtitle_orig_files(output_template)
 
             if self.stop_requested:
                 self.download_cancelled.emit()

@@ -26,11 +26,11 @@ class DownloadInfoThread(QThread):
                 info_dict = ydl.extract_info(self.url, download=False)
 
             if self.url_type == "playlist":
-                data = self.playlist_info(info_dict)
+                videos_dict = self.playlist_info(info_dict)
             else:
-                data = self.video_info(info_dict)
+                videos_dict = self.video_info(info_dict)
 
-            self.vidoes_info.emit(data)
+            self.vidoes_info.emit(videos_dict)
 
         except Exception as error:
             self.info_failed.emit(str(error))
