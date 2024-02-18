@@ -4,6 +4,7 @@ import yt_dlp
 from yt_dlp.utils import DownloadCancelled
 from PyQt5.QtCore import QThread, pyqtSignal
 from app.utils.helpers import handle_num, format_bytes, format_seconds, safe_name
+from app.ytdlp.core import build_download_opts, is_subtitle_error
 
 class DownloadingThread(QThread):
     progress_changed = pyqtSignal(int)
@@ -26,76 +27,14 @@ class DownloadingThread(QThread):
     def Cancel_download(self):
         self.stop_requested = True
 
-    def Handle_subtitle_opts(self):
-        if not self.download_subtitles:
-            return {}
-
-        return {
-            "writesubtitles": True,
-            "writeautomaticsub": True,
-            "subtitleslangs": ["en", "ar"],
-            "subtitlesformat": "srt/best",
-            "sleep_subtitles": 2,
-            "postprocessors": [{
-                "key": "FFmpegEmbedSubtitle",
-            }],
-        }
-
     def Handle_ydl_opts(self, output_template, use_subtitles):
-        ydl_opts = {
-            "format": self.Handle_quality_format(),
-            "outtmpl": output_template,
-            "noplaylist": self.download_type != "playlist",
-            "progress_hooks": [self.progress_hook],
-            "quiet": True,
-            "no_warnings": True,
-            "continuedl": True,
-            "overwrites": False,
-        }
-
-        if use_subtitles:
-            ydl_opts.update(self.Handle_subtitle_opts())
-
-        if self.download_type == "playlist":
-            ydl_opts["ignoreerrors"] = True
-
-        return ydl_opts
-
-    def Handle_subtitle_error(self, error_text):
-        error_text = str(error_text).lower()
-        subtitle_words = [
-            "subtitle",
-            "subtitles",
-            "automatic captions",
-            "requested format not available",
-            "unable to download video subtitles",
-        ]
-        return any(word in error_text for word in subtitle_words)
-
-    def Handle_quality_format(self):
-        if ("+" in self.quality) or ("/" in self.quality) or ("[" in self.quality):
-            return self.quality
-
-        if self.quality == "Audio only (139)":
-            return "139/ba[ext=m4a]"
-
-        if self.quality == "240p":
-            resolution = "240"
-        elif self.quality == "480p":
-            resolution = "480"
-        elif self.quality == "720p":
-            resolution = "720"
-        else:
-            resolution = ""
-
-        if resolution != "":
-            return (
-                f"(bv[height<={resolution}][ext=mp4][container=mp4_dash]+139)/"
-                f"(bv[height<={resolution}][ext=mp4][container=mp4_dash]+ba[ext=m4a])/"
-                f"best[height<={resolution}][ext=mp4]/best"
-            )
-
-        return "(bv[ext=mp4][container=mp4_dash]+139)/(bv[ext=mp4]+ba[ext=m4a])/best[ext=mp4]/best"
+        return build_download_opts(
+            output_template=output_template,
+            quality=self.quality,
+            download_type=self.download_type,
+            use_subtitles=use_subtitles,
+            progress_hook=self.progress_hook,
+        )
 
     def progress_hook(self, d):
         if self.stop_requested:
@@ -194,7 +133,7 @@ class DownloadingThread(QThread):
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl: # pyright: ignore[reportArgumentType]
                     ydl.download([self.url])
             except Exception as error:
-                if self.download_subtitles and self.Handle_subtitle_error(str(error)):
+                if self.download_subtitles and is_subtitle_error(str(error)):
                     self.status_changed.emit("Retrying without subtitles")
                     self.details_changed.emit("Subtitle failed, video will continue")
                     retry_opts = self.Handle_ydl_opts(output_template, False)
