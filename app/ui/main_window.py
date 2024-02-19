@@ -37,6 +37,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.browse_btn = self.browseButton
         self.quality_comboBox = self.Quality_comboBox
         self.subtitle_checkBox = self.Subtitles_checkBox
+        self.chapters_checkBox = self.Chapters_chehkBox
         self.thumbnail_label = self.Thumbnail_label
         self.status_label = self.Display_videoName
         self.progress_details_label = self.label_4
@@ -189,6 +190,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.quality_comboBox.setEnabled(enabled)
         self.playlist_action_combo.setEnabled(enabled)
         self.subtitle_checkBox.setEnabled(enabled)
+        self.chapters_checkBox.setEnabled(enabled)
         self.playlist_preview_list.setEnabled(enabled)
 
     def Get_url_text(self):
@@ -608,6 +610,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
             download_type,
             playlist_title,
             self.subtitle_checkBox.isChecked(),
+            self.chapters_checkBox.isChecked(),
             self.current_video_language,
         )
         self.download_thread.progress_changed.connect(self.Update_progress)

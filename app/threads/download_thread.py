@@ -1,4 +1,5 @@
 import os
+import re
 
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled
@@ -27,6 +28,7 @@ class DownloadingThread(QThread):
         download_type="video",
         playlist_title="",
         download_subtitles=False,
+        download_chapters=False,
         video_language="",
     ):
         super().__init__()
@@ -36,8 +38,10 @@ class DownloadingThread(QThread):
         self.download_type = download_type
         self.playlist_title = playlist_title
         self.download_subtitles = download_subtitles
+        self.download_chapters = download_chapters
         self.video_language = video_language
         self.stop_requested = False
+        self.chapter_targets = {}
 
     def Cancel_download(self):
         self.stop_requested = True
@@ -133,9 +137,49 @@ class DownloadingThread(QThread):
             self.details_changed.emit("   |   ".join(detail_parts) if detail_parts else "Receiving video data")
 
         if status == "finished":
+            info_dict = d.get("info_dict", {})
+            ext_value = str(info_dict.get("ext", "")).lower()
+            is_subtitle_file = ext_value in ["vtt", "srt", "ttml", "sbv", "json"]
+            if self.download_chapters and not is_subtitle_file:
+                chapters = info_dict.get("chapters")
+                output_filename = d.get("filename")
+                if output_filename and isinstance(chapters, list) and len(chapters) > 0:
+                    self.chapter_targets[output_filename] = chapters
+
             self.progress_changed.emit(100)
             self.status_changed.emit("Finalizing file")
             self.details_changed.emit("Merging audio and video, then saving the final file")
+
+    def Write_chapters_files(self):
+        if not self.chapter_targets:
+            return
+
+        written_count = 0
+        written_paths = set()
+        for output_filename, chapters in self.chapter_targets.items():
+            base_name, _ = os.path.splitext(output_filename)
+            base_name = re.sub(r"\.f\d+$", "", base_name)
+            chapter_file_path = f"{base_name}.pbf"
+            if chapter_file_path in written_paths:
+                continue
+
+            try:
+                with open(chapter_file_path, "w", encoding="utf-8") as chapter_file:
+                    chapter_file.write("[Bookmark]\n")
+                    for index, chapter in enumerate(chapters):
+                        end_time = chapter.get("end_time")
+                        title = str(chapter.get("title", f"Chapter {index + 1}")).replace("*", "-")
+                        if end_time is None:
+                            continue
+                        chapter_file.write(f"{index}={int(float(end_time) * 1000)}*{title}*\n")
+                written_count += 1
+                written_paths.add(chapter_file_path)
+            except Exception:
+                continue
+
+        if written_count > 0:
+            self.status_changed.emit("Chapters files created")
+            self.details_changed.emit(f"Created {written_count} PotPlayer chapter file(s)")
 
     def Cleanup_subtitle_orig_files(self, output_template):
         template_dir = os.path.dirname(output_template)
@@ -197,6 +241,9 @@ class DownloadingThread(QThread):
                     self.details_changed.emit("Some subtitle languages failed (e.g. rate limit), video is saved")
 
                 self.Cleanup_subtitle_orig_files(output_template)
+
+            if self.download_chapters and not self.stop_requested:
+                self.Write_chapters_files()
 
             if self.stop_requested:
                 self.download_cancelled.emit()
