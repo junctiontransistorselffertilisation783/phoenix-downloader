@@ -29,6 +29,8 @@ class DownloadingThread(QThread):
         download_type="video",
         playlist_title="",
         playlist_count=0,
+        playlist_selected_count=0,
+        playlist_items="",
         add_prefix=False,
         prefix_mode=0,
         download_subtitles=False,
@@ -42,6 +44,8 @@ class DownloadingThread(QThread):
         self.download_type = download_type
         self.playlist_title = playlist_title
         self.playlist_count = int(playlist_count or 0)
+        self.playlist_selected_count = int(playlist_selected_count or 0)
+        self.playlist_items = str(playlist_items or "").strip()
         self.add_prefix = bool(add_prefix)
         self.prefix_mode = int(prefix_mode or 0)
         self.download_subtitles = download_subtitles
@@ -57,9 +61,13 @@ class DownloadingThread(QThread):
         if not self.add_prefix:
             return ""
 
-        if self.playlist_count >= 100:
+        count_for_digits = self.playlist_count
+        if self.prefix_mode == 1 and self.playlist_selected_count > 0:
+            count_for_digits = self.playlist_selected_count
+
+        if count_for_digits >= 100:
             digits = 3
-        elif self.playlist_count >= 10:
+        elif count_for_digits >= 10:
             digits = 2
         else:
             digits = 1
@@ -84,6 +92,7 @@ class DownloadingThread(QThread):
             quality=self.quality,
             download_type=self.download_type,
             progress_hook=self.progress_hook,
+            playlist_items=self.playlist_items,
         )
 
     def Handle_subtitle_pass_options(self, output_template, subtitle_options):
@@ -91,6 +100,8 @@ class DownloadingThread(QThread):
             output_template=output_template,
             progress_hook=self.progress_hook,
             subtitle_options=subtitle_options,
+            download_type=self.download_type,
+            playlist_items=self.playlist_items,
         )
 
     def progress_hook(self, d):

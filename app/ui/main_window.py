@@ -22,6 +22,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.playlist_entries = []
         self.playlist_title = ""
         self.selected_playlist_entry = None
+        self.playlist_count = 0
         self.current_video_language = "unknown"
         self.last_loaded_url = ""
         self.default = True
@@ -81,6 +82,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.Playlist_comboBox.currentIndexChanged.connect(self.Handle_playlist_selection)
         self.AdvancedOptions_checkBox.clicked.connect(self.Adv_UI_Setup)
         self.Plst_Range_checkBox.clicked.connect(self.Adv_UI_Setup)
+        self.CurrentVideo_checkBox.clicked.connect(self.Adv_UI_Setup)
         self.Add_Prefix_checkBox.clicked.connect(self.Adv_UI_Setup)
         self.Add_Suffix_checkBox.clicked.connect(self.Adv_UI_Setup)
         self.Range_save_pushButton.clicked.connect(self.Adv_UI_Setup)
@@ -107,6 +109,32 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.v_options_groupBox.hide()
         self.plst_options_groupBox.hide()
         self.prefix_no_cmbx.show()
+        self.Handle_playlist_mode_ui()
+
+    def Handle_playlist_mode_ui(self):
+        range_checked = self.Plst_Range_checkBox.isChecked()
+        current_checked = self.CurrentVideo_checkBox.isChecked()
+
+        if range_checked and current_checked:
+            if self.sender() == self.CurrentVideo_checkBox:
+                self.Plst_Range_checkBox.setChecked(False)
+                range_checked = False
+            else:
+                self.CurrentVideo_checkBox.setChecked(False)
+                current_checked = False
+
+        if range_checked:
+            self.Plst_Range_frame.show()
+            self.CurrentVideo_checkBox.setEnabled(False)
+        else:
+            self.Plst_Range_frame.hide()
+            self.CurrentVideo_checkBox.setEnabled(True)
+
+        if current_checked:
+            self.Plst_Range_checkBox.setEnabled(False)
+            self.Plst_Range_frame.hide()
+        else:
+            self.Plst_Range_checkBox.setEnabled(True)
 
     def Defulat_fun(self):
         self.default = False
@@ -128,12 +156,10 @@ class MainApp(QMainWindow, Ui_MainWindow):
                 self.resize(self.width(), self.height() - 150)
 
         elif checkbox == self.Plst_Range_checkBox:
-            if self.Plst_Range_checkBox.isChecked():
-                self.Plst_Range_frame.show()
-                self.CurrentVideo_checkBox.hide()
-            else:
-                self.Plst_Range_frame.hide()
-                self.CurrentVideo_checkBox.show()
+            self.Handle_playlist_mode_ui()
+
+        elif checkbox == self.CurrentVideo_checkBox:
+            self.Handle_playlist_mode_ui()
 
         elif checkbox == self.Range_save_pushButton:
             start = self.Range_start_spnbx.value()
@@ -355,6 +381,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.playlist_entries = []
         self.playlist_title = ""
         self.selected_playlist_entry = None
+        self.playlist_count = 0
         self.current_video_language = "unknown"
         self.video_info_loaded = False
         self.Set_mode_layout("empty")
@@ -473,6 +500,89 @@ class MainApp(QMainWindow, Ui_MainWindow):
 
         return build_quality_format("720p")
 
+    def Handle_Playlist_items_range(self):
+        total_count = max(0, int(self.playlist_count or len(self.playlist_entries)))
+        if total_count <= 0:
+            return "", 0
+
+        if self.CurrentVideo_checkBox.isChecked() and self.selected_playlist_entry is not None:
+            index_value = int(self.selected_playlist_entry.get("index", 0))
+            if 1 <= index_value <= total_count:
+                return str(index_value), 1
+
+        if not self.Plst_Range_checkBox.isChecked():
+            return "", total_count
+
+        start = self.Range_start_spnbx.value()
+        end = self.Range_end_spnbx.value()
+        if end < start:
+            start, end = end, start
+
+        start = max(1, min(total_count, int(start)))
+        end = max(1, min(total_count, int(end)))
+
+        items_ranges = [f"{start}-{end}"]
+        items_nums = []
+        items_count = self.Items_Range_cmbx.count()
+
+        for i in range(items_count):
+            item = self.Items_Range_cmbx.itemText(i).strip().replace(" ", "")
+            if item == "":
+                continue
+            if item.isdigit():
+                value = int(item)
+                if 1 <= value <= total_count:
+                    items_nums.append(str(value))
+            elif "-" in item:
+                parts = item.split("-")
+                if (len(parts) == 2) and (parts[0].isdigit()) and (parts[1].isdigit()):
+                    left = int(parts[0])
+                    right = int(parts[1])
+                    if right < left:
+                        left, right = right, left
+                    left = max(1, min(total_count, left))
+                    right = max(1, min(total_count, right))
+                    if right >= left:
+                        items_ranges.append(f"{left}-{right}")
+
+        current_item = self.Items_Range_cmbx.currentText().strip().replace(" ", "")
+        if current_item != "":
+            if current_item.isdigit():
+                value = int(current_item)
+                if 1 <= value <= total_count:
+                    items_nums.append(str(value))
+            elif "-" in current_item:
+                parts = current_item.split("-")
+                if (len(parts) == 2) and (parts[0].isdigit()) and (parts[1].isdigit()):
+                    left = int(parts[0])
+                    right = int(parts[1])
+                    if right < left:
+                        left, right = right, left
+                    left = max(1, min(total_count, left))
+                    right = max(1, min(total_count, right))
+                    if right >= left:
+                        items_ranges.append(f"{left}-{right}")
+
+        all_items = items_nums + items_ranges
+        unique_items = []
+        seen_items = set()
+        selected_numbers = set()
+        for item in all_items:
+            if item not in seen_items:
+                unique_items.append(item)
+                seen_items.add(item)
+            if "-" in item:
+                left, right = item.split("-", 1)
+                for number_value in range(int(left), int(right) + 1):
+                    selected_numbers.add(number_value)
+            elif item.isdigit():
+                selected_numbers.add(int(item))
+
+        if len(unique_items) == 0:
+            return "", total_count
+
+        return ",".join(unique_items), len(selected_numbers)
+
     def Handle_get_video_info(self):
         self.auto_info_timer.stop()
         if self.is_downloading:
@@ -559,6 +669,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.playlist_title = title
             self.playlist_entries = data.get("entries", [])
             playlist_count = data.get("playlist_count", len(self.playlist_entries))
+            self.playlist_count = int(playlist_count)
 
             self.playlist_num_display.setText("1")
             self.Range_start_spnbx.setMaximum(max(1, int(playlist_count)))
@@ -623,6 +734,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
         url = self.Get_url_text()
         download_type = "video"
         playlist_title = ""
+        playlist_count_for_prefix = 0
+        playlist_items = ""
         quality = self.quality_comboBox.currentData()
         if quality is None or quality == "":
             quality = self.quality_comboBox.currentText().strip()
@@ -632,9 +745,14 @@ class MainApp(QMainWindow, Ui_MainWindow):
                 raise ValueError("Select playlist video index first")
             download_type = "playlist"
             playlist_title = self.playlist_title
+            total_playlist_count = max(0, int(self.playlist_count or len(self.playlist_entries)))
+            playlist_items, selected_count = self.Handle_Playlist_items_range()
+            playlist_count_for_prefix = total_playlist_count
+            if self.prefix_no_cmbx.currentIndex() == 1 and selected_count > 0:
+                playlist_count_for_prefix = selected_count
             quality = self.Build_playlist_quality_from_selection()
 
-        return url, download_type, playlist_title, quality
+        return url, download_type, playlist_title, quality, playlist_count_for_prefix, playlist_items
 
     def Handle_download(self):
         save_dir = self.Get_save_path_text()
@@ -651,7 +769,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return
 
         try:
-            download_url, download_type, playlist_title, quality = self.Build_download_request()
+            download_url, download_type, playlist_title, quality, playlist_count_for_prefix, playlist_items = self.Build_download_request()
         except ValueError as error:
             QMessageBox.warning(self, "Download Not Ready", str(error))
             return
@@ -661,7 +779,10 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.status_label.setText("Starting download...")
 
         if download_type == "playlist":
-            self.progress_details_label.setText("Preparing full playlist download with selected quality target")
+            if playlist_items != "":
+                self.progress_details_label.setText(f"Preparing playlist range download: {playlist_items}")
+            else:
+                self.progress_details_label.setText("Preparing full playlist download with selected quality target")
         else:
             self.progress_details_label.setText("Preparing selected video format")
 
@@ -677,6 +798,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
             download_type,
             playlist_title,
             len(self.playlist_entries) if download_type == "playlist" else 0,
+            playlist_count_for_prefix if download_type == "playlist" else 0,
+            playlist_items if download_type == "playlist" else "",
             self.Add_Prefix_checkBox.isChecked() if download_type == "playlist" else False,
             self.prefix_no_cmbx.currentIndex() if download_type == "playlist" else 0,
             self.subtitle_checkBox.isChecked(),

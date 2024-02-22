@@ -89,7 +89,7 @@ def build_quality_format(quality):
     return "(bv[ext=mp4][container=mp4_dash]+139)/(bv[ext=mp4]+ba[ext=m4a])/best[ext=mp4]/best"
 
 
-def build_download_options(output_template, quality, download_type, progress_hook):
+def build_download_options(output_template, quality, download_type, progress_hook, playlist_items=""):
     ydl_opts = {
         "format": build_quality_format(quality),
         "outtmpl": output_template,
@@ -103,6 +103,9 @@ def build_download_options(output_template, quality, download_type, progress_hoo
 
     if download_type == "playlist":
         ydl_opts["ignoreerrors"] = True
+        playlist_items_text = str(playlist_items or "").strip()
+        if playlist_items_text != "":
+            ydl_opts["playlist_items"] = playlist_items_text
 
     return ydl_opts
 
@@ -119,11 +122,11 @@ def is_subtitle_error(error_text):
     return any(word in error_text for word in subtitle_words)
 
 
-def build_subtitle_download_options(output_template, progress_hook, subtitle_options):
+def build_subtitle_download_options(output_template, progress_hook, subtitle_options, download_type="video", playlist_items=""):
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": output_template,
-        "noplaylist": True,
+        "noplaylist": download_type != "playlist",
         "progress_hooks": [progress_hook],
         "quiet": True,
         "no_warnings": True,
@@ -132,6 +135,10 @@ def build_subtitle_download_options(output_template, progress_hook, subtitle_opt
         "continuedl": True,
         "overwrites": False,
     }
+    if download_type == "playlist":
+        playlist_items_text = str(playlist_items or "").strip()
+        if playlist_items_text != "":
+            ydl_opts["playlist_items"] = playlist_items_text
     ydl_opts.update(subtitle_options)
     return ydl_opts
 
