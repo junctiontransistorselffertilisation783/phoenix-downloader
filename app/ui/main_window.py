@@ -1,4 +1,5 @@
 import os
+import re
 
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
@@ -7,6 +8,7 @@ from PyQt5.QtWidgets import *
 from app.threads.download_thread import DownloadingThread
 from app.threads.get_info_thread import DownloadInfoThread
 from app.ui.ui_downloader import Ui_MainWindow
+from app.ytdlp.core import build_quality_format
 
 
 class MainApp(QMainWindow, Ui_MainWindow):
@@ -19,11 +21,14 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.is_downloading = False
         self.playlist_entries = []
         self.playlist_title = ""
-        self.playlist_policy_quality_items = []
         self.selected_playlist_entry = None
         self.current_video_language = "unknown"
+        self.last_loaded_url = ""
         self.default = True
         self.settings = QSettings("PhoenixDownloader", "PhoenixDownloaderApp")
+        self.auto_info_timer = QTimer(self)
+        self.auto_info_timer.setSingleShot(True)
+        self.auto_info_timer.timeout.connect(self.Handle_auto_get_video_info)
         self.init_ui()
         self.Load_saved_data()
         self.Reset_video_info()
@@ -44,24 +49,6 @@ class MainApp(QMainWindow, Ui_MainWindow):
 
         self.quality_label = self.label_3
         self.info_group = self.Thumbnail_label
-
-        self.playlist_action_wrap = QWidget(self.centralwidget)
-        self.playlist_action_wrap.setVisible(False)
-        self.playlist_action_combo = QComboBox(self.playlist_action_wrap)
-        self.playlist_action_combo.addItem("Download selected video", "selected")
-        self.playlist_action_combo.addItem("Download full playlist", "playlist")
-
-        self.playlist_preview_list = QListWidget(self.centralwidget)
-        self.playlist_preview_list.setGeometry(QRect(630, 180, 255, 182))
-        self.playlist_preview_list.hide()
-
-        self.info_type_label = QLabel(self.centralwidget)
-        self.video_title_label = QLabel(self.centralwidget)
-        self.video_duration_label = QLabel(self.centralwidget)
-        self.info_hint_label = QLabel(self.centralwidget)
-        self.playlist_count_value = QLabel(self.centralwidget)
-        self.playlist_total_duration_value = QLabel(self.centralwidget)
-        self.playlist_selected_value = QLabel(self.centralwidget)
 
         self.cancelButton = QPushButton("Cancel", self.centralwidget)
         self.cancelButton.setGeometry(QRect(390, 470, 170, 36))
@@ -91,8 +78,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.searchButton.pressed.connect(self.Defulat_fun)
         self.get_info_btn.clicked.connect(self.Handle_get_video_info)
         self.browse_btn.clicked.connect(self.Handle_location)
-        self.playlist_action_combo.currentIndexChanged.connect(self.Handle_playlist_action_changed)
-        self.playlist_preview_list.itemSelectionChanged.connect(self.Handle_playlist_selection)
+        self.Playlist_comboBox.currentIndexChanged.connect(self.Handle_playlist_selection)
         self.AdvancedOptions_checkBox.clicked.connect(self.Adv_UI_Setup)
         self.Plst_Range_checkBox.clicked.connect(self.Adv_UI_Setup)
         self.Add_Prefix_checkBox.clicked.connect(self.Adv_UI_Setup)
@@ -188,10 +174,9 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.path_input.setEnabled(enabled)
         self.browse_btn.setEnabled(enabled)
         self.quality_comboBox.setEnabled(enabled)
-        self.playlist_action_combo.setEnabled(enabled)
         self.subtitle_checkBox.setEnabled(enabled)
         self.chapters_checkBox.setEnabled(enabled)
-        self.playlist_preview_list.setEnabled(enabled)
+        self.Playlist_comboBox.setEnabled(enabled)
 
     def Get_url_text(self):
         return self.url_input.currentText().strip()
@@ -290,6 +275,10 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return "playlist"
         return "video"
 
+    def Is_youtube_url(self, url):
+        url = str(url or "")
+        return ("youtube.com" in url) or ("youtu.be" in url)
+
     def Set_thumbnail_data(self, thumbnail_data):
         self.thumbnail_label.clear()
 
@@ -309,50 +298,62 @@ class MainApp(QMainWindow, Ui_MainWindow):
             format_code = item.get("format", "")
             self.quality_comboBox.addItem(label, format_code)
 
+        if self.quality_comboBox.count() == 0:
+            return
+
+        selected_index = -1
+        for i in range(self.quality_comboBox.count()):
+            text = self.quality_comboBox.itemText(i).lower()
+            if ("480p" in text) or ("x480" in text) or (" 480 " in text):
+                selected_index = i
+                break
+
+        if selected_index >= 0:
+            self.quality_comboBox.setCurrentIndex(selected_index)
+            return
+
+        if self.current_info_type == "playlist":
+            for i in range(self.quality_comboBox.count()):
+                text = self.quality_comboBox.itemText(i).lower()
+                if ("360p" in text) or ("x360" in text) or (" 360 " in text):
+                    self.quality_comboBox.setCurrentIndex(i)
+                    return
+
         if preferred_texts:
             for preferred_text in preferred_texts:
+                preferred_low = preferred_text.lower()
                 for i in range(self.quality_comboBox.count()):
-                    if self.quality_comboBox.itemText(i).startswith(preferred_text):
+                    text = self.quality_comboBox.itemText(i).lower()
+                    if text.startswith(preferred_low) or (preferred_low in text):
                         self.quality_comboBox.setCurrentIndex(i)
                         return
+
+        self.quality_comboBox.setCurrentIndex(0)
 
     def Set_mode_layout(self, info_type):
         self.current_info_type = info_type
 
         if info_type == "playlist":
-            self.playlist_action_wrap.show()
-            self.playlist_preview_list.show()
-            self.playlist_count_value.show()
-            self.playlist_total_duration_value.show()
-            self.playlist_selected_value.show()
+            self.playlist_num_display.show()
+            self.Playlist_comboBox.show()
             self.quality_label.setText("Quality")
         elif info_type == "video":
-            self.playlist_action_wrap.hide()
-            self.playlist_preview_list.hide()
-            self.playlist_count_value.hide()
-            self.playlist_total_duration_value.hide()
-            self.playlist_selected_value.hide()
+            self.playlist_num_display.hide()
+            self.Playlist_comboBox.hide()
             self.quality_label.setText("Quality")
         else:
-            self.playlist_action_wrap.hide()
-            self.playlist_preview_list.hide()
-            self.playlist_count_value.hide()
-            self.playlist_total_duration_value.hide()
-            self.playlist_selected_value.hide()
+            self.playlist_num_display.hide()
+            self.Playlist_comboBox.hide()
 
     def Update_download_button_text(self):
         if self.current_info_type == "playlist":
-            if self.playlist_action_combo.currentData() == "playlist":
-                self.downloadButton.setText("Download Playlist")
-            else:
-                self.downloadButton.setText("Download Selected Video")
-        else:
-            self.downloadButton.setText("Download Video")
+            self.downloadButton.setText("Download Playlist")
+            return
+        self.downloadButton.setText("Download Video")
 
     def Set_empty_info_state(self):
         self.playlist_entries = []
         self.playlist_title = ""
-        self.playlist_policy_quality_items = []
         self.selected_playlist_entry = None
         self.current_video_language = "unknown"
         self.video_info_loaded = False
@@ -361,6 +362,10 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.downloadButton.setEnabled(False)
         self.Set_download_controls(False)
         self.quality_comboBox.clear()
+        self.Playlist_comboBox.clear()
+        self.playlist_num_display.clear()
+        self.playlist_num_display.hide()
+        self.Playlist_comboBox.hide()
         self.progressBar.setValue(0)
         self.status_label.setText("Ready")
         self.progress_details_label.setText("")
@@ -373,80 +378,103 @@ class MainApp(QMainWindow, Ui_MainWindow):
 
     def Handle_url_text_changed(self, _text=""):
         self.Reset_video_info()
+        self.Schedule_auto_get_video_info()
 
-    def Populate_playlist_entries(self, entries):
-        self.playlist_preview_list.clear()
-        first_ready_row = -1
+    def Schedule_auto_get_video_info(self):
+        if self.is_downloading:
+            return
 
-        for row_index, entry in enumerate(entries):
-            prefix = f"{entry.get('index', 0):02d}"
-            title = entry.get("title", "-")
-            duration_text = entry.get("duration_text", "Unknown")
-            availability = "Ready" if entry.get("is_available", False) else "Unavailable"
-            item_text = f"{prefix}  |  {title}  |  {duration_text}  |  {availability}"
-            item = QListWidgetItem(item_text)
-            item.setData(Qt.UserRole, row_index)
+        url = self.Get_url_text()
+        if not self.Is_youtube_url(url):
+            self.auto_info_timer.stop()
+            return
 
-            if not entry.get("is_available", False):
-                item.setForeground(QColor("#777777"))
-            elif first_ready_row == -1:
-                first_ready_row = row_index
+        if url == self.last_loaded_url and self.video_info_loaded:
+            return
 
-            self.playlist_preview_list.addItem(item)
+        self.auto_info_timer.start(1200)
 
-        if first_ready_row >= 0:
-            self.playlist_preview_list.setCurrentRow(first_ready_row)
-        elif self.playlist_preview_list.count() > 0:
-            self.playlist_preview_list.setCurrentRow(0)
+    def Handle_auto_get_video_info(self):
+        if self.is_downloading:
+            return
 
-    def Refresh_playlist_quality_mode(self):
+        url = self.Get_url_text()
+        if url == "":
+            return
+
+        if not self.Is_youtube_url(url):
+            return
+
+        if url == self.last_loaded_url and self.video_info_loaded:
+            return
+
+        self.Handle_get_video_info()
+
+    def Populate_playlist_comboBox(self):
+        self.Playlist_comboBox.blockSignals(True)
+        self.Playlist_comboBox.clear()
+        for entry in self.playlist_entries:
+            index_value = int(entry.get("index", 0))
+            self.Playlist_comboBox.addItem(str(index_value))
+        if self.Playlist_comboBox.count() > 0:
+            self.Playlist_comboBox.setCurrentIndex(0)
+        self.Playlist_comboBox.blockSignals(False)
+        self.Handle_playlist_selection()
+
+    def Handle_playlist_selection(self):
         if self.current_info_type != "playlist":
             return
 
-        action = self.playlist_action_combo.currentData()
-        if action == "playlist":
-            self.Load_quality_items(self.playlist_policy_quality_items, ["720p", "Best"])
-            self.progress_details_label.setText("The whole playlist will be saved inside its own folder")
-            self.downloadButton.setEnabled(len(self.playlist_entries) > 0)
-        else:
-            if self.selected_playlist_entry:
-                entry_quality_items = self.selected_playlist_entry.get("quality_items", [])
-                self.Load_quality_items(entry_quality_items, ["720p", "Best"])
-                self.downloadButton.setEnabled(self.selected_playlist_entry.get("is_available", False) and len(entry_quality_items) > 0)
-            else:
-                self.quality_comboBox.clear()
-                self.downloadButton.setEnabled(False)
-            self.progress_details_label.setText("The selected playlist video will be downloaded")
-
-        self.Update_download_button_text()
-
-    def Handle_playlist_selection(self):
-        current_item = self.playlist_preview_list.currentItem()
-        if current_item is None:
+        selected_index = self.Playlist_comboBox.currentIndex()
+        if selected_index < 0 or selected_index >= len(self.playlist_entries):
             self.selected_playlist_entry = None
-            self.playlist_selected_value.setText("")
-            return
-
-        selected_index = current_item.data(Qt.UserRole)
-        if selected_index is None or selected_index < 0 or selected_index >= len(self.playlist_entries):
-            self.selected_playlist_entry = None
-            self.playlist_selected_value.setText("")
+            self.quality_comboBox.clear()
+            self.downloadButton.setEnabled(False)
             return
 
         entry = self.playlist_entries[selected_index]
         self.selected_playlist_entry = entry
+
+        selected_thumbnail = entry.get("thumbnail_data")
+        if selected_thumbnail:
+            self.Set_thumbnail_data(selected_thumbnail)
+
+        entry_quality_items = entry.get("quality_items", [])
+        self.Load_quality_items(entry_quality_items, ["480p", "720p", "Best"])
+
+        entry_title = str(entry.get("title", ""))
+        self.status_label.setText(entry_title)
         total_entries = len(self.playlist_entries)
-        self.playlist_selected_value.setText(f"Selected Video: {entry.get('index', 0):02d}/{total_entries:02d} - {entry.get('title', '-')}")
+        self.playlist_num_display.setText(f"{selected_index + 1}/{total_entries}")
+        self.downloadButton.setEnabled(bool(entry_quality_items))
+        self.progress_details_label.setText("Selected video quality will be used for full playlist with fallback")
 
-        if self.playlist_action_combo.currentData() == "selected":
-            entry_quality_items = entry.get("quality_items", [])
-            self.Load_quality_items(entry_quality_items, ["720p", "Best"])
-            self.downloadButton.setEnabled(entry.get("is_available", False) and len(entry_quality_items) > 0)
+    def Build_playlist_quality_from_selection(self):
+        selected_text = self.quality_comboBox.currentText().strip().lower()
+        match = re.search(r"(\d{3,4})p", selected_text)
+        if match:
+            height_value = int(match.group(1))
+            return build_quality_format(f"{height_value}p")
 
-    def Handle_playlist_action_changed(self):
-        self.Refresh_playlist_quality_mode()
+        match = re.search(r"(\d{3,4})x(\d{3,4})", selected_text)
+        if match:
+            height_value = int(match.group(2))
+            if height_value <= 240:
+                return build_quality_format("240p")
+            if height_value <= 480:
+                return build_quality_format("480p")
+            if height_value <= 720:
+                return build_quality_format("720p")
+            return build_quality_format("Best")
+
+        data_value = self.quality_comboBox.currentData()
+        if isinstance(data_value, str) and data_value.strip() != "":
+            return data_value
+
+        return build_quality_format("720p")
 
     def Handle_get_video_info(self):
+        self.auto_info_timer.stop()
         if self.is_downloading:
             QMessageBox.warning(self, "Download Running", "Cancel the current download first")
             return
@@ -456,7 +484,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
             QMessageBox.warning(self, "URL Needed", "Enter YouTube URL first")
             return
 
-        if ("youtube.com" not in url) and ("youtu.be" not in url):
+        if not self.Is_youtube_url(url):
             QMessageBox.warning(self, "Invalid URL", "Please enter a valid YouTube URL")
             return
 
@@ -466,15 +494,56 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.status_label.setText("Loading info...")
         self.progress_details_label.setText("Reading media details and available formats")
 
-        self.info_thread = DownloadInfoThread(url, url_type)
+        self.info_thread = DownloadInfoThread(url, url_type, self.Thumbnail_checkBox.isChecked())
         self.info_thread.vidoes_info.connect(self.Handle_video_info)
+        self.info_thread.update_Entreis.connect(self.Handle_playlist_entry_update)
         self.info_thread.info_failed.connect(self.Handle_info_failed)
         self.info_thread.start()
+
+    def Handle_playlist_entry_update(self, entry_update):
+        if self.current_info_type != "playlist":
+            return
+
+        entry_index = int(entry_update.get("index", 0)) - 1
+        if entry_index < 0 or entry_index >= len(self.playlist_entries):
+            return
+
+        entry = self.playlist_entries[entry_index]
+        quality_items = entry_update.get("quality_items", [])
+        if quality_items:
+            entry["quality_items"] = quality_items
+            entry["is_available"] = True
+
+        updated_title = str(entry_update.get("title", "")).strip()
+        if updated_title:
+            entry["title"] = updated_title
+
+        duration_seconds = entry_update.get("duration_seconds")
+        if isinstance(duration_seconds, int) and duration_seconds > 0:
+            entry["duration_seconds"] = duration_seconds
+
+        thumbnail_data = entry_update.get("thumbnail_data")
+        if thumbnail_data:
+            entry["thumbnail_data"] = thumbnail_data
+
+        if thumbnail_data and entry_index == 0:
+            self.Set_thumbnail_data(thumbnail_data)
+            self.status_label.setText(str(entry.get("title", self.playlist_title)))
+            self.progress_details_label.setText("First video info loaded. continue loading playlist videos in groups of 3")
+
+        selected_index = self.Playlist_comboBox.currentIndex()
+        if selected_index == entry_index:
+            self.selected_playlist_entry = entry
+            if entry.get("thumbnail_data"):
+                self.Set_thumbnail_data(entry.get("thumbnail_data"))
+            self.Load_quality_items(entry.get("quality_items", []), ["480p", "720p", "Best"])
+            self.downloadButton.setEnabled(self.quality_comboBox.count() > 0)
 
     def Handle_video_info(self, data):
         self.get_info_btn.setEnabled(True)
         self.Save_url_history(self.Get_url_text())
         self.video_info_loaded = True
+        self.last_loaded_url = self.Get_url_text()
         self.info_group.show()
 
         info_type = data.get("info_type", "video")
@@ -484,25 +553,36 @@ class MainApp(QMainWindow, Ui_MainWindow):
 
         self.Set_mode_layout(info_type)
         self.Set_thumbnail_data(thumbnail_data)
-        self.info_hint_label.clear()
 
         if info_type == "playlist":
             self.current_video_language = "unknown"
             self.playlist_title = title
             self.playlist_entries = data.get("entries", [])
-            self.playlist_policy_quality_items = data.get("quality_items", [])
             playlist_count = data.get("playlist_count", len(self.playlist_entries))
-            total_duration_text = data.get("total_duration_text", "Unknown")
 
-            self.info_type_label.setText("Playlist")
-            self.video_title_label.setText(title)
-            self.video_duration_label.setText(f"Channel: {uploader}")
-            self.playlist_count_value.setText(f"Videos: {playlist_count}")
-            self.playlist_total_duration_value.setText(f"Total Duration: {total_duration_text}")
-            self.Populate_playlist_entries(self.playlist_entries)
-            self.Refresh_playlist_quality_mode()
-            self.status_label.setText("Playlist info loaded")
-            self.progress_details_label.setText("Choose selected video or full playlist, then start download")
+            self.playlist_num_display.setText("1")
+            self.Range_start_spnbx.setMaximum(max(1, int(playlist_count)))
+            self.Range_end_spnbx.setMaximum(max(1, int(playlist_count)))
+            self.Range_end_spnbx.setValue(max(1, int(playlist_count)))
+
+            if len(self.playlist_entries) > 0:
+                first_entry = self.playlist_entries[0]
+                first_title = first_entry.get("title", title)
+                self.status_label.setText(str(first_title))
+                fast_playlist_quality = [
+                    {"label": "Best available", "format": build_quality_format("Best")},
+                    {"label": "720p", "format": build_quality_format("720p")},
+                    {"label": "480p", "format": build_quality_format("480p")},
+                    {"label": "240p", "format": build_quality_format("240p")},
+                    {"label": "Audio only (139)", "format": build_quality_format("Audio only (139)")},
+                ]
+                self.Load_quality_items(fast_playlist_quality, ["480p", "720p", "Best"])
+
+            self.Populate_playlist_comboBox()
+            self.status_label.setText(str(title))
+            self.progress_details_label.setText(f"Playlist loaded: {playlist_count} videos. loading first video info...")
+            self.downloadButton.setEnabled(self.Playlist_comboBox.count() > 0 and self.quality_comboBox.count() > 0)
+            self.Update_download_button_text()
         else:
             duration_text = data.get("duration_text", "-")
             quality_items = data.get("quality_items", [])
@@ -514,10 +594,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
             auto_count = int(subtitle_profile.get("auto_count", 0))
             preferred_available = subtitle_profile.get("preferred_available", [])
 
-            self.info_type_label.setText("Video")
-            self.video_title_label.setText(title)
-            self.video_duration_label.setText(f"Channel: {uploader}    |    Duration: {duration_text}")
-            self.Load_quality_items(quality_items, ["720p", "Best"])
+            self.status_label.setText(str(title))
+            self.Load_quality_items(quality_items, ["480p", "720p", "Best"])
             self.downloadButton.setEnabled(self.quality_comboBox.count() > 0)
             self.subtitle_checkBox.setEnabled(has_subtitles)
             if not has_subtitles:
@@ -529,13 +607,13 @@ class MainApp(QMainWindow, Ui_MainWindow):
                 if preferred_available:
                     subtitle_hint = subtitle_hint + f" | preferred found: {', '.join(preferred_available)}"
 
-            self.status_label.setText("Video info loaded")
-            self.progress_details_label.setText(f"Choose quality and start download | lang={language} | {subtitle_hint}")
+            self.progress_details_label.setText(f"Channel: {uploader} | Duration: {duration_text} | lang={language} | {subtitle_hint}")
             self.Update_download_button_text()
 
     def Handle_info_failed(self, error_text):
         self.get_info_btn.setEnabled(True)
         self.video_info_loaded = False
+        self.last_loaded_url = ""
         self.downloadButton.setEnabled(False)
         self.status_label.setText("Failed to load info")
         self.progress_details_label.setText("Could not read this URL")
@@ -545,30 +623,21 @@ class MainApp(QMainWindow, Ui_MainWindow):
         url = self.Get_url_text()
         download_type = "video"
         playlist_title = ""
-
-        if self.current_info_type == "playlist":
-            action = self.playlist_action_combo.currentData()
-            if action == "playlist":
-                download_type = "playlist"
-                playlist_title = self.playlist_title
-            else:
-                if self.selected_playlist_entry is None:
-                    raise ValueError("Select a playlist video first")
-
-                entry_url = self.selected_playlist_entry.get("webpage_url", "")
-                if entry_url == "":
-                    raise ValueError("The selected playlist video is not available")
-
-                url = entry_url
-
-        return url, download_type, playlist_title
-
-    def Handle_download(self):
-        save_dir = self.Get_save_path_text()
         quality = self.quality_comboBox.currentData()
         if quality is None or quality == "":
             quality = self.quality_comboBox.currentText().strip()
 
+        if self.current_info_type == "playlist":
+            if self.selected_playlist_entry is None:
+                raise ValueError("Select playlist video index first")
+            download_type = "playlist"
+            playlist_title = self.playlist_title
+            quality = self.Build_playlist_quality_from_selection()
+
+        return url, download_type, playlist_title, quality
+
+    def Handle_download(self):
+        save_dir = self.Get_save_path_text()
         if self.Get_url_text() == "":
             QMessageBox.warning(self, "URL Needed", "Enter YouTube URL first")
             return
@@ -582,7 +651,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return
 
         try:
-            download_url, download_type, playlist_title = self.Build_download_request()
+            download_url, download_type, playlist_title, quality = self.Build_download_request()
         except ValueError as error:
             QMessageBox.warning(self, "Download Not Ready", str(error))
             return
@@ -592,9 +661,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.status_label.setText("Starting download...")
 
         if download_type == "playlist":
-            self.progress_details_label.setText("Preparing full playlist download")
-        elif self.current_info_type == "playlist":
-            self.progress_details_label.setText("Preparing selected playlist video")
+            self.progress_details_label.setText("Preparing full playlist download with selected quality target")
         else:
             self.progress_details_label.setText("Preparing selected video format")
 
@@ -609,6 +676,9 @@ class MainApp(QMainWindow, Ui_MainWindow):
             quality,
             download_type,
             playlist_title,
+            len(self.playlist_entries) if download_type == "playlist" else 0,
+            self.Add_Prefix_checkBox.isChecked() if download_type == "playlist" else False,
+            self.prefix_no_cmbx.currentIndex() if download_type == "playlist" else 0,
             self.subtitle_checkBox.isChecked(),
             self.chapters_checkBox.isChecked(),
             self.current_video_language,
@@ -641,12 +711,15 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.Save_url_history(self.Get_url_text())
         self.is_downloading = False
         self.download_thread = None
-        self.status_label.setText("Download completed")
-        self.progress_details_label.setText("The file was saved successfully")
-        self.downloadButton.setEnabled(True)
+        self.status_label.setText("Ready")
+        self.progress_details_label.setText("")
+        self.downloadButton.setEnabled(False)
         self.Set_download_controls(False)
         self.Set_inputs_enabled(True)
         QMessageBox.information(self, "Success", f"Download saved to:\n{save_dir}")
+        self.url_input.setCurrentText("")
+        self.last_loaded_url = ""
+        self.Set_empty_info_state()
 
     def Download_failed(self, error_text):
         self.is_downloading = False

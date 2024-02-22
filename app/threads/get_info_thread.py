@@ -1,18 +1,21 @@
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import yt_dlp
 from PyQt5.QtCore import QThread, pyqtSignal
-from app.ytdlp.core import build_playlist_info, build_video_info
+from app.ytdlp.core import build_playlist_info, build_quality_items, build_video_info
 
 
 class DownloadInfoThread(QThread):
     vidoes_info = pyqtSignal(dict)
+    update_Entreis = pyqtSignal(dict)
     info_failed = pyqtSignal(str)
 
-    def __init__(self, url, url_type):
+    def __init__(self, url, url_type, enable_thumbnail=True):
         super().__init__()
         self.url = url
         self.url_type = url_type
+        self.enable_thumbnail = bool(enable_thumbnail)
 
     def run(self):
         try:
@@ -21,45 +24,126 @@ class DownloadInfoThread(QThread):
                 "skip_download": True,
                 "no_warnings": True,
             }
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl: # type: ignore
-                info_dict = ydl.extract_info(self.url, download=False)
-
             if self.url_type == "playlist":
-                videos_dict = self.playlist_info(info_dict)
+                videos_dict = self.Handle_playlist_info_fast()
+                self.vidoes_info.emit(videos_dict)
+                self.Handle_playlist_entries_enrich(videos_dict)
+                return
             else:
-                videos_dict = self.video_info(info_dict)
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl: # type: ignore
+                    info_dict = ydl.extract_info(self.url, download=False)
+                videos_dict = self.Handle_video_info(info_dict)
 
             self.vidoes_info.emit(videos_dict)
 
         except Exception as error:
             self.info_failed.emit(str(error))
 
-    def video_info(self, info_dict):
+    def Handle_video_info(self, info_dict):
         thumbnail_data = None
         thumbnail_url = info_dict.get("thumbnail", "")
-        if thumbnail_url:
+        if self.enable_thumbnail and thumbnail_url:
             thumbnail_data = self.get_thumbnail(thumbnail_url)
         return build_video_info(info_dict, thumbnail_data)
 
-    def playlist_info(self, info_dict):
+    def Handle_playlist_info(self, info_dict):
         entries = info_dict.get("entries", [])
-        valid_entries = []
-
-        for entry in entries:
-            if entry:
-                valid_entries.append(entry)
+        valid_entries = [entry for entry in entries if entry]
 
         thumbnail_data = None
         thumbnail_url = info_dict.get("thumbnail", "")
+
+        if (not thumbnail_url):
+            thumbnails_list = info_dict.get("thumbnails", [])
+            if isinstance(thumbnails_list, list) and len(thumbnails_list) > 0:
+                last_thumb = thumbnails_list[-1]
+                if isinstance(last_thumb, dict):
+                    thumbnail_url = last_thumb.get("url", "")
 
         if (not thumbnail_url) and len(valid_entries) > 0:
             thumbnail_url = valid_entries[0].get("thumbnail", "")
 
-        if thumbnail_url:
+        if self.enable_thumbnail and thumbnail_url:
             thumbnail_data = self.get_thumbnail(thumbnail_url)
 
         return build_playlist_info(info_dict, thumbnail_data)
+
+    def Handle_playlist_info_fast(self):
+        flat_opts = {
+            "quiet": True,
+            "skip_download": True,
+            "no_warnings": True,
+            "extract_flat": "in_playlist",
+        }
+
+        with yt_dlp.YoutubeDL(flat_opts) as ydl: # type: ignore
+            flat_info = ydl.extract_info(self.url, download=False)
+
+        return self.Handle_playlist_info(flat_info)
+
+    def Handle_playlist_entries_enrich(self, playlist_data):
+        full_opts = {
+            "quiet": True,
+            "skip_download": True,
+            "no_warnings": True,
+            "noplaylist": True,
+        }
+
+        entries = playlist_data.get("entries", [])
+        if len(entries) == 0:
+            return
+
+        entry_urls = []
+        for entry in entries:
+            url = entry.get("webpage_url") or entry.get("url") or ""
+            entry_urls.append(str(url))
+
+        def load_one_entry(index_value, entry_url):
+            if entry_url == "":
+                return {"index": index_value, "quality_items": []}
+
+            with yt_dlp.YoutubeDL(full_opts) as ydl: # type: ignore
+                entry_info = ydl.extract_info(entry_url, download=False)
+
+            formats = entry_info.get("formats", [])
+            duration_seconds = entry_info.get("duration", 0)
+            quality_items = build_quality_items(formats, duration_seconds)
+            thumbnail_data = None
+            thumbnail_url = entry_info.get("thumbnail", "")
+            if self.enable_thumbnail and thumbnail_url:
+                thumbnail_data = self.get_thumbnail(thumbnail_url)
+            return {
+                "index": index_value,
+                "title": str(entry_info.get("title", "")),
+                "duration_seconds": duration_seconds or 0,
+                "quality_items": quality_items,
+                "is_available": len(quality_items) > 0,
+                "thumbnail_data": thumbnail_data,
+            }
+
+        try:
+            first_result = load_one_entry(1, entry_urls[0])
+            self.update_Entreis.emit(first_result)
+        except Exception:
+            pass
+
+        remaining = [(i + 1, entry_urls[i]) for i in range(1, len(entry_urls))]
+
+        group_size = 3
+        for group_start in range(0, len(remaining), group_size):
+            group_items = remaining[group_start:group_start + group_size]
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                futures = [
+                    executor.submit(load_one_entry, index_value, entry_url)
+                    for index_value, entry_url in group_items
+                ]
+                for future in as_completed(futures):
+                    try:
+                        self.update_Entreis.emit(future.result())
+                    except Exception:
+                        continue
+
+        return
 
     def get_thumbnail(self, thumbnail_url):
         try:
