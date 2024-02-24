@@ -33,6 +33,8 @@ class DownloadingThread(QThread):
         playlist_items="",
         add_prefix=False,
         prefix_mode=0,
+        add_suffix=False,
+        suffix_text="",
         download_subtitles=False,
         download_chapters=False,
         video_language="",
@@ -48,6 +50,8 @@ class DownloadingThread(QThread):
         self.playlist_items = str(playlist_items or "").strip()
         self.add_prefix = bool(add_prefix)
         self.prefix_mode = int(prefix_mode or 0)
+        self.add_suffix = bool(add_suffix)
+        self.suffix_text = str(suffix_text or "")
         self.download_subtitles = download_subtitles
         self.download_chapters = download_chapters
         self.video_language = video_language
@@ -82,6 +86,24 @@ class DownloadingThread(QThread):
     def Is_subtitle_file(self, info_dict):
         ext_value = str(info_dict.get("ext", "")).lower()
         return ext_value in ["vtt", "srt", "ttml", "sbv", "json"]
+
+    def Handle_suffix_text(self):
+        if not self.add_suffix:
+            return ""
+
+        suffix = self.suffix_text.strip()
+        if suffix == "":
+            return ""
+
+        suffix = re.sub(r"[\\/:*?\"<>|]", "-", suffix)
+        suffix = re.sub(r"\s+", " ", suffix).strip()
+        if suffix == "":
+            return ""
+
+        if not suffix.startswith(" "):
+            suffix = f" {suffix}"
+
+        return suffix
 
     def Cancel_download(self):
         self.stop_requested = True
@@ -280,6 +302,7 @@ class DownloadingThread(QThread):
             self.details_changed.emit("Connecting to YouTube and preparing the selected format")
 
             output_template = os.path.join(self.save_dir, "%(title)s.%(ext)s")
+            suffix_text = self.Handle_suffix_text()
             if self.download_type == "playlist":
                 folder_title = safe_name(self.playlist_title)
                 if self.playlist_count > 0:
@@ -287,7 +310,9 @@ class DownloadingThread(QThread):
                 playlist_folder = os.path.join(self.save_dir, folder_title)
                 os.makedirs(playlist_folder, exist_ok=True)
                 prefix_template = self.Build_playlist_prefix_template()
-                output_template = os.path.join(playlist_folder, f"{prefix_template}%(title)s.%(ext)s")
+                output_template = os.path.join(playlist_folder, f"{prefix_template}%(title)s{suffix_text}.%(ext)s")
+            else:
+                output_template = os.path.join(self.save_dir, f"%(title)s{suffix_text}.%(ext)s")
 
             if self.download_subtitles and not self.stop_requested:
                 self.subtitle_thread = threading.Thread(

@@ -83,6 +83,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.AdvancedOptions_checkBox.clicked.connect(self.Adv_UI_Setup)
         self.Plst_Range_checkBox.clicked.connect(self.Adv_UI_Setup)
         self.CurrentVideo_checkBox.clicked.connect(self.Adv_UI_Setup)
+        self.Audio_Only_checkBox.clicked.connect(self.Adv_UI_Setup)
         self.Add_Prefix_checkBox.clicked.connect(self.Adv_UI_Setup)
         self.Add_Suffix_checkBox.clicked.connect(self.Adv_UI_Setup)
         self.Range_save_pushButton.clicked.connect(self.Adv_UI_Setup)
@@ -110,6 +111,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.plst_options_groupBox.hide()
         self.prefix_no_cmbx.show()
         self.Handle_playlist_mode_ui()
+        self.Handle_audio_only_mode()
+        self.Handle_url_options_mode()
 
     def Handle_playlist_mode_ui(self):
         range_checked = self.Plst_Range_checkBox.isChecked()
@@ -136,9 +139,36 @@ class MainApp(QMainWindow, Ui_MainWindow):
         else:
             self.Plst_Range_checkBox.setEnabled(True)
 
+    def Handle_audio_only_mode(self):
+        audio_only_checked = self.Audio_Only_checkBox.isChecked()
+        if audio_only_checked:
+            self.quality_comboBox.setEnabled(False)
+        else:
+            self.quality_comboBox.setEnabled(True)
+
     def Defulat_fun(self):
         self.default = False
         self.Playlist_comboBox.setCurrentIndex(0)
+
+    def Handle_url_options_mode(self):
+        url = self.Get_url_text()
+        is_playlist_url = self.Is_youtube_url(url) and (self.Detect_url_type(url) == "playlist")
+
+        self.plst_options_groupBox.setEnabled(is_playlist_url)
+
+        if not is_playlist_url:
+            self.Plst_Range_checkBox.setChecked(False)
+            self.CurrentVideo_checkBox.setChecked(False)
+            self.Plst_Range_frame.hide()
+            self.Plst_Range_checkBox.setEnabled(False)
+            self.CurrentVideo_checkBox.setEnabled(False)
+            self.Playlist_comboBox.setEnabled(False)
+            self.playlist_num_display.hide()
+        else:
+            self.Plst_Range_checkBox.setEnabled(True)
+            self.CurrentVideo_checkBox.setEnabled(True)
+            self.Playlist_comboBox.setEnabled(True)
+            self.Handle_playlist_mode_ui()
 
     def Adv_UI_Setup(self):
         checkbox = self.sender()
@@ -160,6 +190,9 @@ class MainApp(QMainWindow, Ui_MainWindow):
 
         elif checkbox == self.CurrentVideo_checkBox:
             self.Handle_playlist_mode_ui()
+
+        elif checkbox == self.Audio_Only_checkBox:
+            self.Handle_audio_only_mode()
 
         elif checkbox == self.Range_save_pushButton:
             start = self.Range_start_spnbx.value()
@@ -203,6 +236,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.subtitle_checkBox.setEnabled(enabled)
         self.chapters_checkBox.setEnabled(enabled)
         self.Playlist_comboBox.setEnabled(enabled)
+        if enabled:
+            self.Handle_audio_only_mode()
 
     def Get_url_text(self):
         return self.url_input.currentText().strip()
@@ -396,6 +431,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.progressBar.setValue(0)
         self.status_label.setText("Ready")
         self.progress_details_label.setText("")
+        self.Handle_audio_only_mode()
         self.Update_download_button_text()
 
     def Reset_video_info(self):
@@ -405,6 +441,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
 
     def Handle_url_text_changed(self, _text=""):
         self.Reset_video_info()
+        self.Handle_url_options_mode()
         self.Schedule_auto_get_video_info()
 
     def Schedule_auto_get_video_info(self):
@@ -740,6 +777,9 @@ class MainApp(QMainWindow, Ui_MainWindow):
         if quality is None or quality == "":
             quality = self.quality_comboBox.currentText().strip()
 
+        if self.Audio_Only_checkBox.isChecked():
+            quality = "Audio only (139)"
+
         if self.current_info_type == "playlist":
             if self.selected_playlist_entry is None:
                 raise ValueError("Select playlist video index first")
@@ -750,7 +790,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
             playlist_count_for_prefix = total_playlist_count
             if self.prefix_no_cmbx.currentIndex() == 1 and selected_count > 0:
                 playlist_count_for_prefix = selected_count
-            quality = self.Build_playlist_quality_from_selection()
+            if not self.Audio_Only_checkBox.isChecked():
+                quality = self.Build_playlist_quality_from_selection()
 
         return url, download_type, playlist_title, quality, playlist_count_for_prefix, playlist_items
 
@@ -802,6 +843,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
             playlist_items if download_type == "playlist" else "",
             self.Add_Prefix_checkBox.isChecked() if download_type == "playlist" else False,
             self.prefix_no_cmbx.currentIndex() if download_type == "playlist" else 0,
+            self.Add_Suffix_checkBox.isChecked(),
+            self.Suffix_lineEdit.text(),
             self.subtitle_checkBox.isChecked(),
             self.chapters_checkBox.isChecked(),
             self.current_video_language,
