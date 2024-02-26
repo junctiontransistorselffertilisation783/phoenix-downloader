@@ -99,6 +99,7 @@ def build_download_options(output_template, quality, download_type, progress_hoo
         "no_warnings": True,
         "continuedl": True,
         "overwrites": False,
+        "merge_output_format": "mp4",
     }
 
     if download_type == "playlist":
