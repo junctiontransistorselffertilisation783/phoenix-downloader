@@ -1,5 +1,6 @@
 import os
 import re
+from urllib.parse import parse_qs, urlparse
 
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
@@ -16,6 +17,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
         super().__init__()
         self.download_thread = None
         self.info_thread = None
+        self.info_request_id = 0
+        self.active_info_request_id = 0
         self.video_info_loaded = False
         self.current_info_type = "video"
         self.is_downloading = False
@@ -152,7 +155,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
 
     def Handle_url_options_mode(self):
         url = self.Get_url_text()
-        is_playlist_url = self.Is_youtube_url(url) and (self.Detect_url_type(url) == "playlist")
+        is_playlist_url = self.Has_playlist_context(url)
 
         self.plst_options_groupBox.setEnabled(is_playlist_url)
 
@@ -331,14 +334,105 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.Save_folder_history()
 
     def Detect_url_type(self, url):
-        url = url.lower()
-        if "list=" in url:
+        parsed_info = self.Parse_youtube_url(url)
+        if not parsed_info["is_youtube"]:
+            return "video"
+
+        has_list = parsed_info["has_list"]
+        has_video = parsed_info["has_video"]
+        path_type = parsed_info["path_type"]
+
+        if has_list and has_video:
+            return "mixed"
+
+        if path_type == "playlist" and has_list:
             return "playlist"
+
+        if has_list and not has_video:
+            return "playlist"
+
         return "video"
 
     def Is_youtube_url(self, url):
-        url = str(url or "")
-        return ("youtube.com" in url) or ("youtu.be" in url)
+        parsed_info = self.Parse_youtube_url(url)
+        return parsed_info["is_youtube"]
+
+    def Normalize_url_text(self, url):
+        url_text = str(url or "").strip()
+        if url_text == "":
+            return ""
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", url_text):
+            return f"https://{url_text}"
+        return url_text
+
+    def Parse_youtube_url(self, url):
+        url_text = self.Normalize_url_text(url)
+        if url_text == "":
+            return {
+                "is_youtube": False,
+                "has_list": False,
+                "has_video": False,
+                "path_type": "unknown",
+                "query": {},
+            }
+
+        try:
+            parsed = urlparse(url_text)
+        except Exception:
+            return {
+                "is_youtube": False,
+                "has_list": False,
+                "has_video": False,
+                "path_type": "unknown",
+                "query": {},
+            }
+
+        host = str(parsed.netloc or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+
+        allowed_hosts = {
+            "youtube.com",
+            "m.youtube.com",
+            "music.youtube.com",
+            "youtu.be",
+            "youtube-nocookie.com",
+        }
+        is_youtube = host in allowed_hosts
+
+        query = parse_qs(parsed.query)
+        list_values = query.get("list", [])
+        video_values = query.get("v", [])
+
+        has_list = any(str(value).strip() != "" for value in list_values)
+        has_video = any(str(value).strip() != "" for value in video_values)
+
+        path_value = str(parsed.path or "").lower()
+        path_type = "unknown"
+        if path_value.startswith("/playlist"):
+            path_type = "playlist"
+        elif path_value.startswith("/watch"):
+            path_type = "watch"
+        elif path_value.startswith("/live/"):
+            path_type = "live"
+        elif host == "youtu.be" and path_value.strip("/") != "":
+            path_type = "short_watch"
+            has_video = True
+
+        if path_type in {"watch", "live", "short_watch"} and not has_video:
+            has_video = True
+
+        return {
+            "is_youtube": is_youtube,
+            "has_list": has_list,
+            "has_video": has_video,
+            "path_type": path_type,
+            "query": query,
+        }
+
+    def Has_playlist_context(self, url):
+        parsed_info = self.Parse_youtube_url(url)
+        return parsed_info["is_youtube"] and parsed_info["has_list"]
 
     def Set_thumbnail_data(self, thumbnail_data):
         self.thumbnail_label.clear()
@@ -440,9 +534,27 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.Set_empty_info_state()
 
     def Handle_url_text_changed(self, _text=""):
+        self.Cancel_info_thread()
         self.Reset_video_info()
         self.Handle_url_options_mode()
         self.Schedule_auto_get_video_info()
+
+    def Cancel_info_thread(self):
+        if self.info_thread is None:
+            return
+
+        try:
+            self.info_thread.request_stop()
+        except Exception:
+            pass
+
+        self.info_request_id += 1
+        self.active_info_request_id = self.info_request_id
+
+    def Next_info_request_id(self):
+        self.info_request_id += 1
+        self.active_info_request_id = self.info_request_id
+        return self.active_info_request_id
 
     def Schedule_auto_get_video_info(self):
         if self.is_downloading:
@@ -479,9 +591,19 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.Playlist_comboBox.clear()
         for entry in self.playlist_entries:
             index_value = int(entry.get("index", 0))
-            self.Playlist_comboBox.addItem(str(index_value))
+            entry_title = str(entry.get("title", "")).strip()
+            if entry_title == "":
+                entry_title = f"Video {index_value}"
+            short_title = entry_title
+            if len(short_title) > 45:
+                short_title = short_title[:42].rstrip() + "..."
+            item_text = f"{index_value}. {short_title}"
+            self.Playlist_comboBox.addItem(item_text, index_value)
+            item_row = self.Playlist_comboBox.count() - 1
+            self.Playlist_comboBox.setItemData(item_row, entry_title, Qt.ToolTipRole)
         if self.Playlist_comboBox.count() > 0:
             self.Playlist_comboBox.setCurrentIndex(0)
+            self.Playlist_comboBox.view().setMinimumWidth(520)
         self.Playlist_comboBox.blockSignals(False)
         self.Handle_playlist_selection()
 
@@ -635,19 +757,29 @@ class MainApp(QMainWindow, Ui_MainWindow):
             QMessageBox.warning(self, "Invalid URL", "Please enter a valid YouTube URL")
             return
 
+        self.Cancel_info_thread()
+
         url_type = self.Detect_url_type(url)
+        effective_url_type = "video" if url_type == "mixed" else url_type
+        request_id = self.Next_info_request_id()
         self.get_info_btn.setEnabled(False)
         self.downloadButton.setEnabled(False)
         self.status_label.setText("Loading info...")
-        self.progress_details_label.setText("Reading media details and available formats")
+        if url_type == "mixed":
+            self.progress_details_label.setText("Detected video inside playlist. Loading as video by default")
+        else:
+            self.progress_details_label.setText("Reading media details and available formats")
 
-        self.info_thread = DownloadInfoThread(url, url_type, self.Thumbnail_checkBox.isChecked())
+        self.info_thread = DownloadInfoThread(url, effective_url_type, request_id, self.Thumbnail_checkBox.isChecked())
         self.info_thread.vidoes_info.connect(self.Handle_video_info)
         self.info_thread.update_Entreis.connect(self.Handle_playlist_entry_update)
         self.info_thread.info_failed.connect(self.Handle_info_failed)
         self.info_thread.start()
 
-    def Handle_playlist_entry_update(self, entry_update):
+    def Handle_playlist_entry_update(self, request_id, entry_update):
+        if int(request_id) != int(self.active_info_request_id):
+            return
+
         if self.current_info_type != "playlist":
             return
 
@@ -664,6 +796,12 @@ class MainApp(QMainWindow, Ui_MainWindow):
         updated_title = str(entry_update.get("title", "")).strip()
         if updated_title:
             entry["title"] = updated_title
+            combo_text = updated_title
+            if len(combo_text) > 45:
+                combo_text = combo_text[:42].rstrip() + "..."
+            item_label = f"{entry_index + 1}. {combo_text}"
+            self.Playlist_comboBox.setItemText(entry_index, item_label)
+            self.Playlist_comboBox.setItemData(entry_index, updated_title, Qt.ToolTipRole)
 
         duration_seconds = entry_update.get("duration_seconds")
         if isinstance(duration_seconds, int) and duration_seconds > 0:
@@ -686,7 +824,11 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.Load_quality_items(entry.get("quality_items", []), ["480p", "720p", "Best"])
             self.downloadButton.setEnabled(self.quality_comboBox.count() > 0)
 
-    def Handle_video_info(self, data):
+    def Handle_video_info(self, request_id, data):
+        if int(request_id) != int(self.active_info_request_id):
+            return
+
+        self.info_thread = None
         self.get_info_btn.setEnabled(True)
         self.Save_url_history(self.Get_url_text())
         self.video_info_loaded = True
@@ -758,7 +900,11 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.progress_details_label.setText(f"Channel: {uploader} | Duration: {duration_text} | lang={language} | {subtitle_hint}")
             self.Update_download_button_text()
 
-    def Handle_info_failed(self, error_text):
+    def Handle_info_failed(self, request_id, error_text):
+        if int(request_id) != int(self.active_info_request_id):
+            return
+
+        self.info_thread = None
         self.get_info_btn.setEnabled(True)
         self.video_info_loaded = False
         self.last_loaded_url = ""

@@ -7,18 +7,29 @@ from app.ytdlp.core import build_playlist_info, build_quality_items, build_video
 
 
 class DownloadInfoThread(QThread):
-    vidoes_info = pyqtSignal(dict)
-    update_Entreis = pyqtSignal(dict)
-    info_failed = pyqtSignal(str)
+    vidoes_info = pyqtSignal(int, dict)
+    update_Entreis = pyqtSignal(int, dict)
+    info_failed = pyqtSignal(int, str)
 
-    def __init__(self, url, url_type, enable_thumbnail=True):
+    def __init__(self, url, url_type, request_id, enable_thumbnail=True):
         super().__init__()
         self.url = url
         self.url_type = url_type
+        self.request_id = int(request_id)
         self.enable_thumbnail = bool(enable_thumbnail)
+        self.stop_requested = False
+
+    def request_stop(self):
+        self.stop_requested = True
+
+    def Is_stopped(self):
+        return bool(self.stop_requested)
 
     def run(self):
         try:
+            if self.Is_stopped():
+                return
+
             ydl_opts = {
                 "quiet": True,
                 "skip_download": True,
@@ -26,7 +37,9 @@ class DownloadInfoThread(QThread):
             }
             if self.url_type == "playlist":
                 videos_dict = self.Handle_playlist_info_fast()
-                self.vidoes_info.emit(videos_dict)
+                if self.Is_stopped():
+                    return
+                self.vidoes_info.emit(self.request_id, videos_dict)
                 self.Handle_playlist_entries_enrich(videos_dict)
                 return
             else:
@@ -34,10 +47,14 @@ class DownloadInfoThread(QThread):
                     info_dict = ydl.extract_info(self.url, download=False)
                 videos_dict = self.Handle_video_info(info_dict)
 
-            self.vidoes_info.emit(videos_dict)
+            if self.Is_stopped():
+                return
+            self.vidoes_info.emit(self.request_id, videos_dict)
 
         except Exception as error:
-            self.info_failed.emit(str(error))
+            if self.Is_stopped():
+                return
+            self.info_failed.emit(self.request_id, str(error))
 
     def Handle_video_info(self, info_dict):
         thumbnail_data = None
@@ -82,6 +99,9 @@ class DownloadInfoThread(QThread):
         return self.Handle_playlist_info(flat_info)
 
     def Handle_playlist_entries_enrich(self, playlist_data):
+        if self.Is_stopped():
+            return
+
         full_opts = {
             "quiet": True,
             "skip_download": True,
@@ -99,6 +119,8 @@ class DownloadInfoThread(QThread):
             entry_urls.append(str(url))
 
         def load_one_entry(index_value, entry_url):
+            if self.Is_stopped():
+                return None
             if entry_url == "":
                 return {"index": index_value, "quality_items": []}
 
@@ -123,7 +145,8 @@ class DownloadInfoThread(QThread):
 
         try:
             first_result = load_one_entry(1, entry_urls[0])
-            self.update_Entreis.emit(first_result)
+            if (first_result is not None) and (not self.Is_stopped()):
+                self.update_Entreis.emit(self.request_id, first_result)
         except Exception:
             pass
 
@@ -131,6 +154,9 @@ class DownloadInfoThread(QThread):
 
         group_size = 3
         for group_start in range(0, len(remaining), group_size):
+            if self.Is_stopped():
+                return
+
             group_items = remaining[group_start:group_start + group_size]
             with ThreadPoolExecutor(max_workers=3) as executor:
                 futures = [
@@ -138,8 +164,12 @@ class DownloadInfoThread(QThread):
                     for index_value, entry_url in group_items
                 ]
                 for future in as_completed(futures):
+                    if self.Is_stopped():
+                        return
                     try:
-                        self.update_Entreis.emit(future.result())
+                        result = future.result()
+                        if (result is not None) and (not self.Is_stopped()):
+                            self.update_Entreis.emit(self.request_id, result)
                     except Exception:
                         continue
 
