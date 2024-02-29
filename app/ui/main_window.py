@@ -19,6 +19,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.info_thread = None
         self.info_request_id = 0
         self.active_info_request_id = 0
+        self.loading_info_url = ""
+        self.loading_request_id = 0
         self.video_info_loaded = False
         self.current_info_type = "video"
         self.is_downloading = False
@@ -142,6 +144,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
         else:
             self.Plst_Range_checkBox.setEnabled(True)
 
+        self.Update_download_button_text()
+
     def Handle_audio_only_mode(self):
         audio_only_checked = self.Audio_Only_checkBox.isChecked()
         if audio_only_checked:
@@ -155,7 +159,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
 
     def Handle_url_options_mode(self):
         url = self.Get_url_text()
-        is_playlist_url = self.Has_playlist_context(url)
+        is_playlist_url = self.Is_playlist_context_url(url)
 
         self.plst_options_groupBox.setEnabled(is_playlist_url)
 
@@ -172,6 +176,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.CurrentVideo_checkBox.setEnabled(True)
             self.Playlist_comboBox.setEnabled(True)
             self.Handle_playlist_mode_ui()
+
+        self.Update_download_button_text()
 
     def Adv_UI_Setup(self):
         checkbox = self.sender()
@@ -334,7 +340,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.Save_folder_history()
 
     def Detect_url_type(self, url):
-        parsed_info = self.Parse_youtube_url(url)
+        parsed_info = self.Handle_parse_youtube_url(url)
         if not parsed_info["is_youtube"]:
             return "video"
 
@@ -354,10 +360,10 @@ class MainApp(QMainWindow, Ui_MainWindow):
         return "video"
 
     def Is_youtube_url(self, url):
-        parsed_info = self.Parse_youtube_url(url)
+        parsed_info = self.Handle_parse_youtube_url(url)
         return parsed_info["is_youtube"]
 
-    def Normalize_url_text(self, url):
+    def Handle_normalize_url(self, url):
         url_text = str(url or "").strip()
         if url_text == "":
             return ""
@@ -365,8 +371,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return f"https://{url_text}"
         return url_text
 
-    def Parse_youtube_url(self, url):
-        url_text = self.Normalize_url_text(url)
+    def Handle_parse_youtube_url(self, url):
+        url_text = self.Handle_normalize_url(url)
         if url_text == "":
             return {
                 "is_youtube": False,
@@ -430,8 +436,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
             "query": query,
         }
 
-    def Has_playlist_context(self, url):
-        parsed_info = self.Parse_youtube_url(url)
+    def Is_playlist_context_url(self, url):
+        parsed_info = self.Handle_parse_youtube_url(url)
         return parsed_info["is_youtube"] and parsed_info["has_list"]
 
     def Set_thumbnail_data(self, thumbnail_data):
@@ -502,6 +508,12 @@ class MainApp(QMainWindow, Ui_MainWindow):
 
     def Update_download_button_text(self):
         if self.current_info_type == "playlist":
+            if self.CurrentVideo_checkBox.isChecked():
+                self.downloadButton.setText("Download Current")
+                return
+            if self.Plst_Range_checkBox.isChecked():
+                self.downloadButton.setText("Download Range")
+                return
             self.downloadButton.setText("Download Playlist")
             return
         self.downloadButton.setText("Download Video")
@@ -544,12 +556,14 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return
 
         try:
-            self.info_thread.request_stop()
+            self.info_thread.Handle_stop_request()
         except Exception:
             pass
 
         self.info_request_id += 1
         self.active_info_request_id = self.info_request_id
+        self.loading_info_url = ""
+        self.loading_request_id = 0
 
     def Next_info_request_id(self):
         self.info_request_id += 1
@@ -566,6 +580,10 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return
 
         if url == self.last_loaded_url and self.video_info_loaded:
+            return
+
+        normalized_url = self.Handle_normalize_url(url)
+        if normalized_url != "" and self.loading_info_url == normalized_url:
             return
 
         self.auto_info_timer.start(1200)
@@ -585,6 +603,16 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return
 
         self.Handle_get_video_info()
+
+    def Is_info_request_ready(self, url):
+        normalized_url = self.Handle_normalize_url(url)
+        if normalized_url == "":
+            return False
+
+        if self.loading_info_url == normalized_url:
+            return False
+
+        return True
 
     def Populate_playlist_comboBox(self):
         self.Playlist_comboBox.blockSignals(True)
@@ -757,6 +785,9 @@ class MainApp(QMainWindow, Ui_MainWindow):
             QMessageBox.warning(self, "Invalid URL", "Please enter a valid YouTube URL")
             return
 
+        if not self.Is_info_request_ready(url):
+            return
+
         self.Cancel_info_thread()
 
         url_type = self.Detect_url_type(url)
@@ -770,6 +801,9 @@ class MainApp(QMainWindow, Ui_MainWindow):
         else:
             self.progress_details_label.setText("Reading media details and available formats")
 
+        normalized_url = self.Handle_normalize_url(url)
+        self.loading_info_url = normalized_url
+        self.loading_request_id = request_id
         self.info_thread = DownloadInfoThread(url, effective_url_type, request_id, self.Thumbnail_checkBox.isChecked())
         self.info_thread.vidoes_info.connect(self.Handle_video_info)
         self.info_thread.update_Entreis.connect(self.Handle_playlist_entry_update)
@@ -829,6 +863,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return
 
         self.info_thread = None
+        self.loading_info_url = ""
+        self.loading_request_id = 0
         self.get_info_btn.setEnabled(True)
         self.Save_url_history(self.Get_url_text())
         self.video_info_loaded = True
@@ -905,6 +941,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return
 
         self.info_thread = None
+        self.loading_info_url = ""
+        self.loading_request_id = 0
         self.get_info_btn.setEnabled(True)
         self.video_info_loaded = False
         self.last_loaded_url = ""

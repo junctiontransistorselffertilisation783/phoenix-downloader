@@ -19,7 +19,7 @@ class DownloadInfoThread(QThread):
         self.enable_thumbnail = bool(enable_thumbnail)
         self.stop_requested = False
 
-    def request_stop(self):
+    def Handle_stop_request(self):
         self.stop_requested = True
 
     def Is_stopped(self):
@@ -60,7 +60,7 @@ class DownloadInfoThread(QThread):
         thumbnail_data = None
         thumbnail_url = info_dict.get("thumbnail", "")
         if self.enable_thumbnail and thumbnail_url:
-            thumbnail_data = self.get_thumbnail(thumbnail_url)
+            thumbnail_data = self.Handle_thumbnail_data(thumbnail_url)
         return build_video_info(info_dict, thumbnail_data)
 
     def Handle_playlist_info(self, info_dict):
@@ -81,7 +81,7 @@ class DownloadInfoThread(QThread):
             thumbnail_url = valid_entries[0].get("thumbnail", "")
 
         if self.enable_thumbnail and thumbnail_url:
-            thumbnail_data = self.get_thumbnail(thumbnail_url)
+            thumbnail_data = self.Handle_thumbnail_data(thumbnail_url)
 
         return build_playlist_info(info_dict, thumbnail_data)
 
@@ -133,7 +133,7 @@ class DownloadInfoThread(QThread):
             thumbnail_data = None
             thumbnail_url = entry_info.get("thumbnail", "")
             if self.enable_thumbnail and thumbnail_url:
-                thumbnail_data = self.get_thumbnail(thumbnail_url)
+                thumbnail_data = self.Handle_thumbnail_data(thumbnail_url)
             return {
                 "index": index_value,
                 "title": str(entry_info.get("title", "")),
@@ -175,7 +175,7 @@ class DownloadInfoThread(QThread):
 
         return
 
-    def get_thumbnail(self, thumbnail_url):
+    def Handle_thumbnail_data(self, thumbnail_url):
         try:
             response = requests.get(thumbnail_url, timeout=10)
             if response.status_code == 200:
