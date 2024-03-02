@@ -6,6 +6,7 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 
+from app.cache.download_cache_store import DownloadCacheStore
 from app.threads.download_thread import DownloadingThread
 from app.threads.get_info_thread import DownloadInfoThread
 from app.ui.ui_downloader import Ui_MainWindow
@@ -21,6 +22,9 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.active_info_request_id = 0
         self.loading_info_url = ""
         self.loading_request_id = 0
+        self.current_download_cache_rows = []
+        self.cache_store = DownloadCacheStore()
+        self.cache_store.Load()
         self.video_info_loaded = False
         self.current_info_type = "video"
         self.is_downloading = False
@@ -434,7 +438,132 @@ class MainApp(QMainWindow, Ui_MainWindow):
             "has_video": has_video,
             "path_type": path_type,
             "query": query,
+            "path_value": path_value,
         }
+
+    def Handle_video_id_from_url(self, url):
+        parsed_info = self.Handle_parse_youtube_url(url)
+        query = parsed_info.get("query", {})
+        v_values = query.get("v", [])
+        if len(v_values) > 0:
+            video_id = str(v_values[0]).strip()
+            if video_id != "":
+                return video_id
+
+        if parsed_info.get("path_type") == "short_watch":
+            path_value = str(parsed_info.get("path_value", ""))
+            return path_value.strip("/").strip()
+
+        return ""
+
+    def Handle_list_id_from_url(self, url):
+        parsed_info = self.Handle_parse_youtube_url(url)
+        query = parsed_info.get("query", {})
+        list_values = query.get("list", [])
+        if len(list_values) > 0:
+            list_id = str(list_values[0]).strip()
+            if list_id != "":
+                return list_id
+        return ""
+
+    def Handle_simple_format_text(self, quality):
+        quality_text = str(quality or "").strip()
+        if quality_text == "":
+            return "unknown"
+
+        match = re.search(r"\b(\d{2,4})\b", quality_text)
+        if match:
+            return match.group(1)
+
+        lower_text = quality_text.lower()
+        if "audio" in lower_text:
+            return "audio"
+        if "best" in lower_text:
+            return "best"
+        return "custom"
+
+    def Handle_video_id_from_entry(self, entry):
+        webpage_url = str(entry.get("webpage_url", "")).strip()
+        if webpage_url != "":
+            video_id = self.Handle_video_id_from_url(webpage_url)
+            if video_id != "":
+                return video_id
+        return ""
+
+    def Handle_selected_playlist_indexes(self, playlist_items, total_count):
+        if str(playlist_items).strip() == "":
+            return list(range(1, max(0, int(total_count)) + 1))
+
+        selected_numbers = set()
+        text_items = [part.strip() for part in str(playlist_items).split(",") if part.strip() != ""]
+        for text_item in text_items:
+            if text_item.isdigit():
+                selected_numbers.add(int(text_item))
+                continue
+            if "-" in text_item:
+                left_right = text_item.split("-", 1)
+                if len(left_right) != 2:
+                    continue
+                left_text = left_right[0].strip()
+                right_text = left_right[1].strip()
+                if (not left_text.isdigit()) or (not right_text.isdigit()):
+                    continue
+                left = int(left_text)
+                right = int(right_text)
+                if right < left:
+                    left, right = right, left
+                for value in range(left, right + 1):
+                    selected_numbers.add(value)
+
+        filtered = [value for value in sorted(selected_numbers) if 1 <= value <= int(total_count)]
+        return filtered
+
+    def Build_download_cache_rows(self, download_url, download_type, quality, playlist_items):
+        rows = []
+        format_raw = str(quality or "")
+        format_simple = self.Handle_simple_format_text(quality)
+        list_id = self.Handle_list_id_from_url(download_url)
+        target_dir = self.Get_save_path_text()
+
+        if download_type == "playlist":
+            total_count = len(self.playlist_entries)
+            selected_indexes = self.Handle_selected_playlist_indexes(playlist_items, total_count)
+            if len(selected_indexes) == 0:
+                selected_indexes = list(range(1, total_count + 1))
+
+            for index_value in selected_indexes:
+                if index_value < 1 or index_value > len(self.playlist_entries):
+                    continue
+                entry = self.playlist_entries[index_value - 1]
+                video_id = self.Handle_video_id_from_entry(entry)
+                rows.append(
+                    {
+                        "video_id": video_id,
+                        "list_id": list_id,
+                        "download_type": "playlist",
+                        "playlist_item": str(index_value),
+                        "playlist_items": str(playlist_items or ""),
+                        "format_simple": format_simple,
+                        "format_raw": format_raw,
+                        "target_dir": target_dir,
+                    }
+                )
+            return rows
+
+        video_id = self.Handle_video_id_from_url(download_url)
+        rows.append(
+            {
+                "video_id": video_id,
+                "list_id": list_id,
+                "download_type": "video",
+                "playlist_item": "",
+                "playlist_items": "",
+                "format_simple": format_simple,
+                "format_raw": format_raw,
+                "target_dir": target_dir,
+            }
+        )
+        return rows
 
     def Is_playlist_context_url(self, url):
         parsed_info = self.Handle_parse_youtube_url(url)
@@ -1033,6 +1162,22 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.chapters_checkBox.isChecked(),
             self.current_video_language,
         )
+
+        self.current_download_cache_rows = self.Build_download_cache_rows(download_url, download_type, quality, playlist_items)
+        for cache_row in self.current_download_cache_rows:
+            self.cache_store.Upsert_download_state(
+                cache_row.get("video_id", ""),
+                cache_row.get("list_id", ""),
+                cache_row.get("download_type", ""),
+                cache_row.get("playlist_item", ""),
+                cache_row.get("playlist_items", ""),
+                cache_row.get("format_simple", ""),
+                cache_row.get("format_raw", ""),
+                "downloading",
+                "",
+                cache_row.get("target_dir", save_dir),
+                "",
+            )
         self.download_thread.progress_changed.connect(self.Update_progress)
         self.download_thread.status_changed.connect(self.Update_status)
         self.download_thread.details_changed.connect(self.Update_progress_details)
@@ -1058,9 +1203,24 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.progress_details_label.setText(text)
 
     def Download_finished(self, save_dir):
+        for cache_row in self.current_download_cache_rows:
+            self.cache_store.Upsert_download_state(
+                cache_row.get("video_id", ""),
+                cache_row.get("list_id", ""),
+                cache_row.get("download_type", ""),
+                cache_row.get("playlist_item", ""),
+                cache_row.get("playlist_items", ""),
+                cache_row.get("format_simple", ""),
+                cache_row.get("format_raw", ""),
+                "done",
+                "",
+                save_dir,
+                "",
+            )
         self.Save_url_history(self.Get_url_text())
         self.is_downloading = False
         self.download_thread = None
+        self.current_download_cache_rows = []
         self.status_label.setText("Ready")
         self.progress_details_label.setText("")
         self.downloadButton.setEnabled(False)
@@ -1072,8 +1232,20 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.Set_empty_info_state()
 
     def Download_failed(self, error_text):
+        for cache_row in self.current_download_cache_rows:
+            self.cache_store.Upsert_download_state(
+                cache_row.get("video_id", ""),
+                cache_row.get("list_id", ""),
+                cache_row.get("download_type", ""),
+                cache_row.get("playlist_item", ""),
+                cache_row.get("playlist_items", ""),
+                cache_row.get("format_simple", ""),
+                cache_row.get("format_raw", ""),
+                "failed",
+            )
         self.is_downloading = False
         self.download_thread = None
+        self.current_download_cache_rows = []
         self.status_label.setText("Download failed")
         self.progress_details_label.setText("The download stopped before the file could be saved")
         self.downloadButton.setEnabled(True)
@@ -1082,11 +1254,27 @@ class MainApp(QMainWindow, Ui_MainWindow):
         QMessageBox.critical(self, "Error", f"Download failed:\n{error_text}")
 
     def Download_cancelled(self):
+        for cache_row in self.current_download_cache_rows:
+            self.cache_store.Upsert_download_state(
+                cache_row.get("video_id", ""),
+                cache_row.get("list_id", ""),
+                cache_row.get("download_type", ""),
+                cache_row.get("playlist_item", ""),
+                cache_row.get("playlist_items", ""),
+                cache_row.get("format_simple", ""),
+                cache_row.get("format_raw", ""),
+                "partial",
+            )
         self.is_downloading = False
         self.download_thread = None
+        self.current_download_cache_rows = []
         self.status_label.setText("Download cancelled")
         self.progressBar.setValue(0)
         self.progress_details_label.setText("The active download was cancelled")
         self.downloadButton.setEnabled(True)
         self.Set_download_controls(False)
         self.Set_inputs_enabled(True)
+
+    def closeEvent(self, event):
+        self.cache_store.Save()
+        super().closeEvent(event)
