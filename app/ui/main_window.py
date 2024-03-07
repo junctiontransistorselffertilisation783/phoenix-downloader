@@ -1173,10 +1173,12 @@ class MainApp(QMainWindow, Ui_MainWindow):
                 cache_row.get("playlist_items", ""),
                 cache_row.get("format_simple", ""),
                 cache_row.get("format_raw", ""),
-                "downloading",
-                "",
-                cache_row.get("target_dir", save_dir),
-                "",
+                "queued",
+                temp_dir="",
+                temp_file="",
+                target_dir=cache_row.get("target_dir", save_dir),
+                target_name="",
+                auto_save=True,
             )
         self.download_thread.progress_changed.connect(self.Update_progress)
         self.download_thread.status_changed.connect(self.Update_status)
@@ -1185,6 +1187,23 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.download_thread.download_failed.connect(self.Download_failed)
         self.download_thread.download_cancelled.connect(self.Download_cancelled)
         self.download_thread.start()
+
+        for cache_row in self.current_download_cache_rows:
+            self.cache_store.Upsert_download_state(
+                cache_row.get("video_id", ""),
+                cache_row.get("list_id", ""),
+                cache_row.get("download_type", ""),
+                cache_row.get("playlist_item", ""),
+                cache_row.get("playlist_items", ""),
+                cache_row.get("format_simple", ""),
+                cache_row.get("format_raw", ""),
+                "downloading",
+                temp_dir="",
+                temp_file="",
+                target_dir=cache_row.get("target_dir", save_dir),
+                target_name="",
+                auto_save=True,
+            )
 
     def Handle_cancel_download(self):
         if self.download_thread and self.download_thread.isRunning():
@@ -1213,9 +1232,11 @@ class MainApp(QMainWindow, Ui_MainWindow):
                 cache_row.get("format_simple", ""),
                 cache_row.get("format_raw", ""),
                 "done",
-                "",
-                save_dir,
-                "",
+                temp_dir="",
+                temp_file="",
+                target_dir=save_dir,
+                target_name="",
+                auto_save=True,
             )
         self.Save_url_history(self.Get_url_text())
         self.is_downloading = False
@@ -1242,6 +1263,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
                 cache_row.get("format_simple", ""),
                 cache_row.get("format_raw", ""),
                 "failed",
+                last_error=str(error_text or ""),
+                auto_save=True,
             )
         self.is_downloading = False
         self.download_thread = None
@@ -1264,6 +1287,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
                 cache_row.get("format_simple", ""),
                 cache_row.get("format_raw", ""),
                 "partial",
+                auto_save=True,
             )
         self.is_downloading = False
         self.download_thread = None

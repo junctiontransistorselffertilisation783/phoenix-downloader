@@ -33,9 +33,42 @@ class DownloadCacheStore:
                     cache_key = str(row.get("cache_key", "")).strip()
                     if cache_key == "":
                         continue
-                    self.rows_by_key[cache_key] = row
+                    self.rows_by_key[cache_key] = self.Normalize_loaded_row(row)
         except Exception:
             self.rows_by_key = {}
+
+        self.Recover_interrupted_rows()
+
+    def Normalize_loaded_row(self, row):
+        fixed_row = dict(row)
+
+        if "temp_dir" not in fixed_row:
+            fixed_row["temp_dir"] = ""
+        if "bytes_downloaded" not in fixed_row:
+            fixed_row["bytes_downloaded"] = "0"
+        if "bytes_total" not in fixed_row:
+            fixed_row["bytes_total"] = "0"
+        if "last_progress" not in fixed_row:
+            fixed_row["last_progress"] = "0"
+        if "last_error" not in fixed_row:
+            fixed_row["last_error"] = ""
+        if "state_changed_at" not in fixed_row:
+            fixed_row["state_changed_at"] = str(fixed_row.get("updated_at", ""))
+        if "created_at" not in fixed_row:
+            fixed_row["created_at"] = str(fixed_row.get("updated_at", ""))
+
+        return fixed_row
+
+    def Recover_interrupted_rows(self):
+        now_text = self.Handle_now_text()
+        for cache_key in list(self.rows_by_key.keys()):
+            row = self.rows_by_key.get(cache_key, {})
+            state_text = str(row.get("state", "")).strip().lower()
+            if state_text == "downloading":
+                row["state"] = "partial"
+                row["state_changed_at"] = now_text
+                row["updated_at"] = now_text
+                self.rows_by_key[cache_key] = row
 
     def Save(self):
         fieldnames = [
@@ -48,21 +81,29 @@ class DownloadCacheStore:
             "format_simple",
             "format_raw",
             "state",
+            "temp_dir",
             "temp_file",
             "target_dir",
             "target_name",
+            "bytes_downloaded",
+            "bytes_total",
+            "last_progress",
+            "last_error",
             "created_at",
+            "state_changed_at",
             "updated_at",
         ]
 
         rows = list(self.rows_by_key.values())
+        temp_file_path = self.cache_file_path + ".tmp"
         try:
-            with open(self.cache_file_path, "w", newline="", encoding="utf-8") as csv_file:
+            with open(temp_file_path, "w", newline="", encoding="utf-8") as csv_file:
                 writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
                 writer.writeheader()
                 for row in rows:
                     safe_row = {field: str(row.get(field, "")) for field in fieldnames}
                     writer.writerow(safe_row)
+            os.replace(temp_file_path, self.cache_file_path)
         except Exception:
             return
 
@@ -86,9 +127,15 @@ class DownloadCacheStore:
         format_simple,
         format_raw,
         state,
+        temp_dir="",
         temp_file="",
         target_dir="",
         target_name="",
+        bytes_downloaded="",
+        bytes_total="",
+        last_progress="",
+        last_error="",
+        auto_save=False,
     ):
         cache_key = self.Build_cache_key(video_id, list_id, download_type, playlist_item, format_simple)
         if cache_key == "":
@@ -103,7 +150,19 @@ class DownloadCacheStore:
         row["playlist_items"] = str(playlist_items or "")
         row["format_simple"] = str(format_simple or "")
         row["format_raw"] = str(format_raw or "")
-        row["state"] = str(state or "")
+        new_state = str(state or "")
+        old_state = str(row.get("state", ""))
+        row["state"] = new_state
+
+        if new_state != old_state:
+            row["state_changed_at"] = self.Handle_now_text()
+        elif "state_changed_at" not in row:
+            row["state_changed_at"] = self.Handle_now_text()
+
+        if temp_dir != "":
+            row["temp_dir"] = str(temp_dir)
+        elif "temp_dir" not in row:
+            row["temp_dir"] = ""
 
         if temp_file != "":
             row["temp_file"] = str(temp_file)
@@ -123,5 +182,28 @@ class DownloadCacheStore:
         if "created_at" not in row or str(row.get("created_at", "")).strip() == "":
             row["created_at"] = self.Handle_now_text()
 
+        if bytes_downloaded != "":
+            row["bytes_downloaded"] = str(bytes_downloaded)
+        elif "bytes_downloaded" not in row:
+            row["bytes_downloaded"] = "0"
+
+        if bytes_total != "":
+            row["bytes_total"] = str(bytes_total)
+        elif "bytes_total" not in row:
+            row["bytes_total"] = "0"
+
+        if last_progress != "":
+            row["last_progress"] = str(last_progress)
+        elif "last_progress" not in row:
+            row["last_progress"] = "0"
+
+        if last_error != "":
+            row["last_error"] = str(last_error)
+        elif "last_error" not in row:
+            row["last_error"] = ""
+
         row["updated_at"] = self.Handle_now_text()
         self.rows_by_key[cache_key] = row
+
+        if auto_save:
+            self.Save()
