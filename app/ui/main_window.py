@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 from urllib.parse import parse_qs, urlparse
 
 from PyQt5.QtCore import *
@@ -23,6 +24,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.loading_info_url = ""
         self.loading_request_id = 0
         self.current_download_cache_rows = []
+        self.last_copied_files = []
         self.cache_store = DownloadCacheStore()
         self.cache_store.Load()
         self.video_info_loaded = False
@@ -1128,6 +1130,13 @@ class MainApp(QMainWindow, Ui_MainWindow):
             QMessageBox.warning(self, "Download Not Ready", str(error))
             return
 
+        cache_rows = self.Build_download_cache_rows(download_url, download_type, quality, playlist_items)
+        reused = self.Handle_reuse_done_file(cache_rows, save_dir)
+        if reused:
+            self.current_download_cache_rows = cache_rows
+            self.Download_finished(save_dir)
+            return
+
         self.Save_folder_history()
         self.progressBar.setValue(0)
         self.status_label.setText("Starting download...")
@@ -1163,7 +1172,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.current_video_language,
         )
 
-        self.current_download_cache_rows = self.Build_download_cache_rows(download_url, download_type, quality, playlist_items)
+        self.current_download_cache_rows = cache_rows
+        self.last_copied_files = []
         for cache_row in self.current_download_cache_rows:
             self.cache_store.Upsert_download_state(
                 cache_row.get("video_id", ""),
@@ -1186,6 +1196,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.download_thread.download_finished.connect(self.Download_finished)
         self.download_thread.download_failed.connect(self.Download_failed)
         self.download_thread.download_cancelled.connect(self.Download_cancelled)
+        self.download_thread.files_copied.connect(self.Handle_download_files_copied)
         self.download_thread.start()
 
         for cache_row in self.current_download_cache_rows:
@@ -1221,7 +1232,59 @@ class MainApp(QMainWindow, Ui_MainWindow):
     def Update_progress_details(self, text):
         self.progress_details_label.setText(text)
 
+    def Handle_download_files_copied(self, files_list):
+        if isinstance(files_list, list):
+            self.last_copied_files = [str(x) for x in files_list if str(x).strip() != ""]
+        else:
+            self.last_copied_files = []
+
+    def Handle_reuse_done_file(self, cache_rows, save_dir):
+        if len(cache_rows) != 1:
+            return False
+
+        cache_row = cache_rows[0]
+        cache_key = self.cache_store.Build_cache_key(
+            cache_row.get("video_id", ""),
+            cache_row.get("list_id", ""),
+            cache_row.get("download_type", ""),
+            cache_row.get("playlist_item", ""),
+            cache_row.get("format_simple", ""),
+        )
+        if cache_key == "":
+            return False
+
+        old_row = self.cache_store.rows_by_key.get(cache_key, {})
+        if str(old_row.get("state", "")).lower() != "done":
+            return False
+
+        old_target_dir = str(old_row.get("target_dir", "")).strip()
+        old_target_name = str(old_row.get("target_name", "")).strip()
+        if old_target_dir == "" or old_target_name == "":
+            return False
+
+        source_file = os.path.join(old_target_dir, old_target_name)
+        if not os.path.isfile(source_file):
+            return False
+
+        os.makedirs(save_dir, exist_ok=True)
+        target_file = os.path.join(save_dir, old_target_name)
+        if os.path.normcase(source_file) == os.path.normcase(target_file):
+            return True
+
+        if not os.path.isfile(target_file):
+            try:
+                shutil.copy2(source_file, target_file)
+            except Exception:
+                return False
+
+        self.last_copied_files = [old_target_name]
+        return True
+
     def Download_finished(self, save_dir):
+        target_name_text = ""
+        if len(self.last_copied_files) == 1:
+            target_name_text = os.path.basename(self.last_copied_files[0])
+
         for cache_row in self.current_download_cache_rows:
             self.cache_store.Upsert_download_state(
                 cache_row.get("video_id", ""),
@@ -1235,13 +1298,14 @@ class MainApp(QMainWindow, Ui_MainWindow):
                 temp_dir="",
                 temp_file="",
                 target_dir=save_dir,
-                target_name="",
+                target_name=target_name_text,
                 auto_save=True,
             )
         self.Save_url_history(self.Get_url_text())
         self.is_downloading = False
         self.download_thread = None
         self.current_download_cache_rows = []
+        self.last_copied_files = []
         self.status_label.setText("Ready")
         self.progress_details_label.setText("")
         self.downloadButton.setEnabled(False)
@@ -1269,6 +1333,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.is_downloading = False
         self.download_thread = None
         self.current_download_cache_rows = []
+        self.last_copied_files = []
         self.status_label.setText("Download failed")
         self.progress_details_label.setText("The download stopped before the file could be saved")
         self.downloadButton.setEnabled(True)
@@ -1292,6 +1357,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.is_downloading = False
         self.download_thread = None
         self.current_download_cache_rows = []
+        self.last_copied_files = []
         self.status_label.setText("Download cancelled")
         self.progressBar.setValue(0)
         self.progress_details_label.setText("The active download was cancelled")

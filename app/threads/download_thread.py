@@ -1,6 +1,10 @@
 import os
 import re
+import shutil
 import threading
+import hashlib
+import time
+from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled
@@ -20,6 +24,7 @@ class DownloadingThread(QThread):
     download_finished = pyqtSignal(str)
     download_failed = pyqtSignal(str)
     download_cancelled = pyqtSignal()
+    files_copied = pyqtSignal(list)
 
     def __init__(
         self,
@@ -64,6 +69,8 @@ class DownloadingThread(QThread):
         self.output_template = ""
         self.media_progress_state = {}
         self.last_global_progress = 0
+        self.completed_output_files = []
+        self.temp_work_dir = ""
 
     def Build_playlist_prefix_template(self):
         if not self.add_prefix:
@@ -327,9 +334,15 @@ class DownloadingThread(QThread):
         if status == "finished":
             info_dict = d.get("info_dict", {})
             is_subtitle_file = self.Is_subtitle_file(info_dict)
+            output_filename = d.get("filename")
+
+            if (not is_subtitle_file) and output_filename:
+                output_name = str(output_filename)
+                if output_name not in self.completed_output_files:
+                    self.completed_output_files.append(output_name)
+
             if self.download_chapters and not is_subtitle_file:
                 chapters = info_dict.get("chapters")
-                output_filename = d.get("filename")
                 if output_filename and isinstance(chapters, list) and len(chapters) > 0:
                     self.chapter_targets[output_filename] = chapters
 
@@ -451,24 +464,108 @@ class DownloadingThread(QThread):
             self.status_changed.emit("Preparing download")
             self.details_changed.emit("Connecting to YouTube and preparing the selected format")
 
-            output_template = os.path.join(self.save_dir, "%(title)s.%(ext)s")
+            os.makedirs(self.save_dir, exist_ok=True)
+            local_app_data = os.getenv("LOCALAPPDATA", "")
+            if local_app_data == "":
+                local_app_data = os.path.expanduser("~")
+
+            temp_root = os.path.join(local_app_data, "PhoenixDownloader", "temp_media")
+            os.makedirs(temp_root, exist_ok=True)
+
+            video_id = ""
+            try:
+                parsed = urlparse(str(self.url or ""))
+                query = parse_qs(parsed.query)
+                if "v" in query and len(query["v"]) > 0:
+                    video_id = str(query["v"][0]).strip()
+                if video_id == "":
+                    host = str(parsed.netloc or "").lower()
+                    path_value = str(parsed.path or "").strip("/")
+                    if "youtu.be" in host:
+                        video_id = path_value
+            except Exception:
+                video_id = ""
+
+            key_text = f"{self.url}|{self.download_type}|{self.quality}|{self.playlist_items}"
+            key_hash = hashlib.sha1(key_text.encode("utf-8")).hexdigest()[:12]
+            if video_id != "":
+                temp_folder_name = f"{video_id}_{key_hash}"
+            else:
+                temp_folder_name = f"job_{key_hash}"
+
+            temp_work_dir = os.path.join(temp_root, temp_folder_name)
+            os.makedirs(temp_work_dir, exist_ok=True)
+            self.temp_work_dir = temp_work_dir
+
             suffix_text = self.Handle_suffix_text()
             if self.download_type == "playlist":
                 folder_title = safe_name(self.playlist_title)
                 if self.playlist_count > 0:
                     folder_title = f"{folder_title} [ {self.playlist_count} ]"
-                playlist_folder = os.path.join(self.save_dir, folder_title)
-                os.makedirs(playlist_folder, exist_ok=True)
-                prefix_template = self.Build_playlist_prefix_template()
-                output_template = os.path.join(playlist_folder, f"{prefix_template}%(title)s{suffix_text}.%(ext)s")
-            else:
-                output_template = os.path.join(self.save_dir, f"%(title)s{suffix_text}.%(ext)s")
-            self.output_template = output_template
 
-            ydl_opts = self.Handle_ydl_opts(output_template)
+                target_playlist_folder = os.path.join(self.save_dir, folder_title)
+                temp_playlist_folder = os.path.join(temp_work_dir, folder_title)
+                os.makedirs(target_playlist_folder, exist_ok=True)
+                os.makedirs(temp_playlist_folder, exist_ok=True)
+
+                prefix_template = self.Build_playlist_prefix_template()
+                temp_output_template = os.path.join(temp_playlist_folder, f"{prefix_template}%(title)s{suffix_text}.%(ext)s")
+            else:
+                temp_output_template = os.path.join(temp_work_dir, f"%(title)s{suffix_text}.%(ext)s")
+
+            self.output_template = temp_output_template
+            ydl_opts = self.Handle_ydl_opts(temp_output_template)
+
+            self.status_changed.emit("Preparing temp workspace")
+            self.details_changed.emit("Using AppData temp cache for .part resume")
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: # pyright: ignore[reportArgumentType]
                 ydl.download([self.url])
+
+            self.status_changed.emit("Copying final files")
+            copied_count = 0
+            removed_temp_count = 0
+            copied_relative_files = []
+            for current_root, _dirs, files in os.walk(temp_work_dir):
+                relative_dir = os.path.relpath(current_root, temp_work_dir)
+                if relative_dir == ".":
+                    destination_dir = self.save_dir
+                else:
+                    destination_dir = os.path.join(self.save_dir, relative_dir)
+                os.makedirs(destination_dir, exist_ok=True)
+
+                for file_name in files:
+                    file_name_lower = str(file_name).lower()
+                    if file_name_lower.endswith(".part"):
+                        continue
+                    if file_name_lower.endswith(".ytdl"):
+                        continue
+                    if file_name_lower.endswith(".tmp"):
+                        continue
+
+                    source_file = os.path.join(current_root, file_name)
+                    destination_file = os.path.join(destination_dir, file_name)
+                    if os.path.isfile(destination_file):
+                        continue
+                    try:
+                        shutil.copy2(source_file, destination_file)
+                        copied_count += 1
+                        relative_file = os.path.relpath(destination_file, self.save_dir)
+                        copied_relative_files.append(relative_file)
+                        try:
+                            os.remove(source_file)
+                            removed_temp_count += 1
+                        except Exception:
+                            pass
+                    except Exception:
+                        continue
+
+            if copied_count > 0:
+                self.files_copied.emit(copied_relative_files)
+                self.details_changed.emit(f"Moved {copied_count} file(s) to target and cleared {removed_temp_count} temp file(s)")
+            else:
+                self.files_copied.emit([])
+                self.details_changed.emit("No new files copied (already exists in target or still partial)")
 
             if self.download_chapters and not self.stop_requested:
                 self.chapter_thread = threading.Thread(
@@ -489,9 +586,140 @@ class DownloadingThread(QThread):
             self.progress_changed.emit(100)
             self.download_finished.emit(self.save_dir)
 
+            self.Handle_cleanup_temp_cache(self.temp_work_dir)
+
         except Exception as error:
             if self.stop_requested:
                 self.download_cancelled.emit()
+                self.Handle_cleanup_temp_cache(self.temp_work_dir)
                 return
 
             self.download_failed.emit(str(error))
+            self.Handle_cleanup_temp_cache(self.temp_work_dir)
+
+    def Handle_cleanup_temp_cache(self, active_temp_dir=""):
+        local_app_data = os.getenv("LOCALAPPDATA", "")
+        if local_app_data == "":
+            local_app_data = os.path.expanduser("~")
+
+        temp_root = os.path.join(local_app_data, "PhoenixDownloader", "temp_media")
+        if not os.path.isdir(temp_root):
+            return
+
+        now_time = time.time()
+        keep_days = 10
+        hard_delete_days = 30
+        max_bytes = 10 * 1024 * 1024 * 1024
+        keep_floor_bytes = 1024 * 1024 * 1024
+        keep_seconds = keep_days * 86400
+        hard_seconds = hard_delete_days * 86400
+
+        folder_items = []
+        total_bytes = 0
+        try:
+            folder_names = os.listdir(temp_root)
+        except Exception:
+            return
+
+        for folder_name in folder_names:
+            folder_path = os.path.join(temp_root, folder_name)
+            if not os.path.isdir(folder_path):
+                continue
+
+            folder_bytes = 0
+            newest_time = 0
+            newest_part_time = 0
+            part_bytes = 0
+            try:
+                for walk_root, _dirs, files in os.walk(folder_path):
+                    for file_name in files:
+                        file_path = os.path.join(walk_root, file_name)
+                        try:
+                            stat_data = os.stat(file_path)
+                        except Exception:
+                            continue
+                        file_size = int(stat_data.st_size)
+                        file_mtime = float(stat_data.st_mtime)
+                        folder_bytes += file_size
+                        if file_mtime > newest_time:
+                            newest_time = file_mtime
+                        if str(file_name).lower().endswith(".part"):
+                            part_bytes += file_size
+                            if file_mtime > newest_part_time:
+                                newest_part_time = file_mtime
+            except Exception:
+                continue
+
+            if newest_time == 0:
+                try:
+                    newest_time = os.path.getmtime(folder_path)
+                except Exception:
+                    newest_time = now_time
+
+            folder_items.append(
+                {
+                    "path": folder_path,
+                    "bytes": folder_bytes,
+                    "newest": newest_time,
+                    "newest_part": newest_part_time,
+                    "part_bytes": part_bytes,
+                }
+            )
+            total_bytes += folder_bytes
+
+        for item in folder_items:
+            folder_path = item["path"]
+            if active_temp_dir != "" and os.path.normcase(folder_path) == os.path.normcase(active_temp_dir):
+                continue
+            age_seconds = now_time - float(item["newest"])
+            if age_seconds >= hard_seconds:
+                try:
+                    shutil.rmtree(folder_path, ignore_errors=True)
+                    total_bytes -= int(item["bytes"])
+                except Exception:
+                    continue
+
+        if total_bytes <= max_bytes:
+            for item in folder_items:
+                folder_path = item["path"]
+                if active_temp_dir != "" and os.path.normcase(folder_path) == os.path.normcase(active_temp_dir):
+                    continue
+                if not os.path.isdir(folder_path):
+                    continue
+                age_seconds = now_time - float(item["newest"])
+                if age_seconds < keep_seconds:
+                    continue
+                if item["newest_part"] > 0 and (now_time - float(item["newest_part"])) < keep_seconds:
+                    continue
+                try:
+                    shutil.rmtree(folder_path, ignore_errors=True)
+                except Exception:
+                    continue
+            return
+
+        candidates = []
+        for item in folder_items:
+            folder_path = item["path"]
+            if active_temp_dir != "" and os.path.normcase(folder_path) == os.path.normcase(active_temp_dir):
+                continue
+            if not os.path.isdir(folder_path):
+                continue
+            age_seconds = now_time - float(item["newest"])
+            progress_score = 0
+            if item["bytes"] > 0:
+                progress_score = int((float(item["part_bytes"]) / float(item["bytes"])) * 100)
+            candidates.append((progress_score, age_seconds, item))
+
+        candidates.sort(key=lambda value: (value[0], -value[1]))
+
+        for progress_score, _age_seconds, item in candidates:
+            if total_bytes <= keep_floor_bytes:
+                break
+            if progress_score >= 50:
+                continue
+            folder_path = item["path"]
+            try:
+                shutil.rmtree(folder_path, ignore_errors=True)
+                total_bytes -= int(item["bytes"])
+            except Exception:
+                continue
