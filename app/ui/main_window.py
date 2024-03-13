@@ -25,6 +25,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.loading_request_id = 0
         self.current_download_cache_rows = []
         self.last_copied_files = []
+        self.last_copied_items = []
         self.cache_store = DownloadCacheStore()
         self.cache_store.Load()
         self.video_info_loaded = False
@@ -1197,6 +1198,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.download_thread.download_failed.connect(self.Download_failed)
         self.download_thread.download_cancelled.connect(self.Download_cancelled)
         self.download_thread.files_copied.connect(self.Handle_download_files_copied)
+        self.download_thread.cache_progress.connect(self.Handle_download_cache_progress)
         self.download_thread.start()
 
         for cache_row in self.current_download_cache_rows:
@@ -1233,10 +1235,72 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.progress_details_label.setText(text)
 
     def Handle_download_files_copied(self, files_list):
-        if isinstance(files_list, list):
-            self.last_copied_files = [str(x) for x in files_list if str(x).strip() != ""]
-        else:
-            self.last_copied_files = []
+        self.last_copied_files = []
+        self.last_copied_items = []
+        if not isinstance(files_list, list):
+            return
+
+        for item in files_list:
+            if isinstance(item, dict):
+                relative_file = str(item.get("relative_file", "")).strip()
+                if relative_file != "":
+                    self.last_copied_files.append(relative_file)
+                self.last_copied_items.append(dict(item))
+                continue
+
+            file_text = str(item).strip()
+            if file_text == "":
+                continue
+            self.last_copied_files.append(file_text)
+            self.last_copied_items.append(
+                {
+                    "relative_file": file_text,
+                    "target_name": file_text,
+                    "target_dir": self.Get_save_path_text(),
+                    "video_id": "",
+                    "playlist_item": "",
+                }
+            )
+
+    def Handle_download_cache_progress(self, data):
+        if not isinstance(data, dict):
+            return
+
+        video_id = str(data.get("video_id", "")).strip()
+        playlist_item = str(data.get("playlist_item", "")).strip()
+        state_text = str(data.get("state", "downloading")).strip() or "downloading"
+        temp_dir = str(data.get("temp_dir", "")).strip()
+        temp_file = str(data.get("temp_file", "")).strip()
+        bytes_downloaded = str(data.get("bytes_downloaded", "0")).strip() or "0"
+        bytes_total = str(data.get("bytes_total", "0")).strip() or "0"
+        last_progress = str(data.get("last_progress", "0")).strip() or "0"
+
+        for cache_row in self.current_download_cache_rows:
+            row_video_id = str(cache_row.get("video_id", "")).strip()
+            row_playlist_item = str(cache_row.get("playlist_item", "")).strip()
+            if video_id != "" and row_video_id != video_id:
+                continue
+            if playlist_item != "" and row_playlist_item != playlist_item:
+                continue
+
+            self.cache_store.Upsert_download_state(
+                cache_row.get("video_id", ""),
+                cache_row.get("list_id", ""),
+                cache_row.get("download_type", ""),
+                cache_row.get("playlist_item", ""),
+                cache_row.get("playlist_items", ""),
+                cache_row.get("format_simple", ""),
+                cache_row.get("format_raw", ""),
+                state_text,
+                temp_dir=temp_dir,
+                temp_file=temp_file,
+                target_dir=cache_row.get("target_dir", ""),
+                target_name=cache_row.get("target_name", ""),
+                bytes_downloaded=bytes_downloaded,
+                bytes_total=bytes_total,
+                last_progress=last_progress,
+                auto_save=True,
+            )
 
     def Handle_reuse_done_file(self, cache_rows, save_dir):
         if len(cache_rows) != 1:
@@ -1281,11 +1345,24 @@ class MainApp(QMainWindow, Ui_MainWindow):
         return True
 
     def Download_finished(self, save_dir):
-        target_name_text = ""
-        if len(self.last_copied_files) == 1:
-            target_name_text = os.path.basename(self.last_copied_files[0])
-
         for cache_row in self.current_download_cache_rows:
+            target_name_text = ""
+            row_video_id = str(cache_row.get("video_id", "")).strip()
+            row_playlist_item = str(cache_row.get("playlist_item", "")).strip()
+            for copied_item in self.last_copied_items:
+                copied_video_id = str(copied_item.get("video_id", "")).strip()
+                copied_playlist_item = str(copied_item.get("playlist_item", "")).strip()
+                if row_video_id != "" and copied_video_id != "" and row_video_id != copied_video_id:
+                    continue
+                if row_playlist_item != "" and copied_playlist_item != "" and row_playlist_item != copied_playlist_item:
+                    continue
+                target_name_text = str(copied_item.get("target_name", "")).strip()
+                if target_name_text != "":
+                    break
+
+            if target_name_text == "" and len(self.last_copied_files) == 1:
+                target_name_text = str(self.last_copied_files[0]).strip()
+
             self.cache_store.Upsert_download_state(
                 cache_row.get("video_id", ""),
                 cache_row.get("list_id", ""),
@@ -1306,6 +1383,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.download_thread = None
         self.current_download_cache_rows = []
         self.last_copied_files = []
+        self.last_copied_items = []
         self.status_label.setText("Ready")
         self.progress_details_label.setText("")
         self.downloadButton.setEnabled(False)
@@ -1334,6 +1412,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.download_thread = None
         self.current_download_cache_rows = []
         self.last_copied_files = []
+        self.last_copied_items = []
         self.status_label.setText("Download failed")
         self.progress_details_label.setText("The download stopped before the file could be saved")
         self.downloadButton.setEnabled(True)
@@ -1358,6 +1437,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.download_thread = None
         self.current_download_cache_rows = []
         self.last_copied_files = []
+        self.last_copied_items = []
         self.status_label.setText("Download cancelled")
         self.progressBar.setValue(0)
         self.progress_details_label.setText("The active download was cancelled")

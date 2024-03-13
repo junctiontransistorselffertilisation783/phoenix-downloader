@@ -24,7 +24,8 @@ class DownloadingThread(QThread):
     download_finished = pyqtSignal(str)
     download_failed = pyqtSignal(str)
     download_cancelled = pyqtSignal()
-    files_copied = pyqtSignal(list)
+    files_copied = pyqtSignal(object)
+    cache_progress = pyqtSignal(object)
 
     def __init__(
         self,
@@ -71,6 +72,7 @@ class DownloadingThread(QThread):
         self.last_global_progress = 0
         self.completed_output_files = []
         self.temp_work_dir = ""
+        self.last_cache_emit = {}
 
     def Build_playlist_prefix_template(self):
         if not self.add_prefix:
@@ -241,6 +243,31 @@ class DownloadingThread(QThread):
             playlist_items=self.playlist_items,
         )
 
+    def Handle_cache_emit(self, info_dict, status_text, temp_file, downloaded, total_size, progress_value):
+        if not isinstance(info_dict, dict):
+            return
+
+        video_id = str(info_dict.get("id", "")).strip()
+        playlist_item = str(info_dict.get("playlist_index", "")).strip()
+        cache_key = f"{video_id}|{playlist_item}|{status_text}"
+        last_value = self.last_cache_emit.get(cache_key, -1)
+        if last_value == int(progress_value):
+            return
+
+        self.last_cache_emit[cache_key] = int(progress_value)
+        self.cache_progress.emit(
+            {
+                "video_id": video_id,
+                "playlist_item": playlist_item,
+                "state": str(status_text or ""),
+                "temp_dir": str(self.temp_work_dir or ""),
+                "temp_file": str(temp_file or ""),
+                "bytes_downloaded": str(handle_num(downloaded)),
+                "bytes_total": str(handle_num(total_size)),
+                "last_progress": str(int(progress_value or 0)),
+            }
+        )
+
     def progress_hook(self, d):
         if self.stop_requested:
             raise DownloadCancelled("Download cancelled by user")
@@ -258,6 +285,7 @@ class DownloadingThread(QThread):
             downloaded = handle_num(d.get("downloaded_bytes", 0))
             info_dict = d.get("info_dict", {})
             is_subtitle_file = self.Is_subtitle_file(info_dict)
+            temp_file = d.get("tmpfilename") or d.get("filename") or ""
 
             if not is_subtitle_file:
                 self.Start_subtitles_background()
@@ -329,6 +357,7 @@ class DownloadingThread(QThread):
 
             if not is_subtitle_file:
                 self.status_changed.emit(f"{status_prefix}  {percent_value}%")
+                self.Handle_cache_emit(info_dict, "downloading", temp_file, downloaded, total_size, percent_value)
             self.details_changed.emit("   |   ".join(detail_parts) if detail_parts else "Receiving video data")
 
         if status == "finished":
@@ -338,8 +367,20 @@ class DownloadingThread(QThread):
 
             if (not is_subtitle_file) and output_filename:
                 output_name = str(output_filename)
-                if output_name not in self.completed_output_files:
-                    self.completed_output_files.append(output_name)
+                exists_before = False
+                for item in self.completed_output_files:
+                    if str(item.get("source_file", "")) == output_name:
+                        exists_before = True
+                        break
+                if not exists_before:
+                    self.completed_output_files.append(
+                        {
+                            "source_file": output_name,
+                            "video_id": str(info_dict.get("id", "")).strip(),
+                            "playlist_item": str(info_dict.get("playlist_index", "")).strip(),
+                            "title": str(info_dict.get("title", "")).strip(),
+                        }
+                    )
 
             if self.download_chapters and not is_subtitle_file:
                 chapters = info_dict.get("chapters")
@@ -352,6 +393,7 @@ class DownloadingThread(QThread):
                 self.progress_changed.emit(self.last_global_progress)
                 self.status_changed.emit("Finalizing file")
                 self.details_changed.emit("Merging audio and video, then saving the final file")
+                self.Handle_cache_emit(info_dict, "downloading", output_filename, 0, 0, self.last_global_progress)
 
     def Write_chapters_files(self):
         if not self.chapter_targets:
@@ -551,7 +593,21 @@ class DownloadingThread(QThread):
                         shutil.copy2(source_file, destination_file)
                         copied_count += 1
                         relative_file = os.path.relpath(destination_file, self.save_dir)
-                        copied_relative_files.append(relative_file)
+                        copied_item = {
+                            "relative_file": relative_file,
+                            "target_name": relative_file,
+                            "target_dir": self.save_dir,
+                            "video_id": "",
+                            "playlist_item": "",
+                        }
+                        for finished_item in self.completed_output_files:
+                            finished_source = str(finished_item.get("source_file", ""))
+                            if os.path.normcase(finished_source) != os.path.normcase(source_file):
+                                continue
+                            copied_item["video_id"] = str(finished_item.get("video_id", ""))
+                            copied_item["playlist_item"] = str(finished_item.get("playlist_item", ""))
+                            break
+                        copied_relative_files.append(copied_item)
                         try:
                             os.remove(source_file)
                             removed_temp_count += 1
