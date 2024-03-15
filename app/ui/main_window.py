@@ -1132,11 +1132,19 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return
 
         cache_rows = self.Build_download_cache_rows(download_url, download_type, quality, playlist_items)
-        reused = self.Handle_reuse_done_file(cache_rows, save_dir)
-        if reused:
-            self.current_download_cache_rows = cache_rows
+        cache_rows, reused_count = self.Handle_reuse_done_file(cache_rows, save_dir)
+        if len(cache_rows) == 0 and reused_count > 0:
+            self.current_download_cache_rows = self.Build_download_cache_rows(download_url, download_type, quality, playlist_items)
             self.Download_finished(save_dir)
             return
+        if download_type == "playlist" and len(cache_rows) > 0:
+            pending_items = []
+            for cache_row in cache_rows:
+                playlist_item_text = str(cache_row.get("playlist_item", "")).strip()
+                if playlist_item_text != "":
+                    pending_items.append(playlist_item_text)
+            if len(pending_items) > 0:
+                playlist_items = ",".join(pending_items)
 
         self.Save_folder_history()
         self.progressBar.setValue(0)
@@ -1303,46 +1311,93 @@ class MainApp(QMainWindow, Ui_MainWindow):
             )
 
     def Handle_reuse_done_file(self, cache_rows, save_dir):
-        if len(cache_rows) != 1:
-            return False
+        pending_rows = []
+        reused_count = 0
+        self.last_copied_files = []
+        self.last_copied_items = []
 
-        cache_row = cache_rows[0]
-        cache_key = self.cache_store.Build_cache_key(
-            cache_row.get("video_id", ""),
-            cache_row.get("list_id", ""),
-            cache_row.get("download_type", ""),
-            cache_row.get("playlist_item", ""),
-            cache_row.get("format_simple", ""),
-        )
-        if cache_key == "":
-            return False
+        for cache_row in cache_rows:
+            cache_key = self.cache_store.Build_cache_key(
+                cache_row.get("video_id", ""),
+                cache_row.get("list_id", ""),
+                cache_row.get("download_type", ""),
+                cache_row.get("playlist_item", ""),
+                cache_row.get("format_simple", ""),
+            )
+            if cache_key == "":
+                pending_rows.append(cache_row)
+                continue
 
-        old_row = self.cache_store.rows_by_key.get(cache_key, {})
-        if str(old_row.get("state", "")).lower() != "done":
-            return False
+            old_row = self.cache_store.rows_by_key.get(cache_key, {})
+            if str(old_row.get("state", "")).lower() != "done":
+                pending_rows.append(cache_row)
+                continue
 
-        old_target_dir = str(old_row.get("target_dir", "")).strip()
-        old_target_name = str(old_row.get("target_name", "")).strip()
-        if old_target_dir == "" or old_target_name == "":
-            return False
+            target_name = str(old_row.get("target_name", "")).strip()
+            if target_name == "":
+                pending_rows.append(cache_row)
+                continue
 
-        source_file = os.path.join(old_target_dir, old_target_name)
-        if not os.path.isfile(source_file):
-            return False
+            source_file = ""
+            old_target_dir = str(old_row.get("target_dir", "")).strip()
+            if old_target_dir != "":
+                old_target_file = os.path.join(old_target_dir, target_name)
+                if os.path.isfile(old_target_file):
+                    source_file = old_target_file
 
-        os.makedirs(save_dir, exist_ok=True)
-        target_file = os.path.join(save_dir, old_target_name)
-        if os.path.normcase(source_file) == os.path.normcase(target_file):
-            return True
+            if source_file == "":
+                old_temp_file = str(old_row.get("temp_file", "")).strip()
+                if old_temp_file != "" and os.path.isfile(old_temp_file):
+                    source_file = old_temp_file
 
-        if not os.path.isfile(target_file):
-            try:
-                shutil.copy2(source_file, target_file)
-            except Exception:
-                return False
+            if source_file == "":
+                pending_rows.append(cache_row)
+                continue
 
-        self.last_copied_files = [old_target_name]
-        return True
+            os.makedirs(save_dir, exist_ok=True)
+            target_file = os.path.join(save_dir, target_name)
+            target_parent = os.path.dirname(target_file)
+            if target_parent != "":
+                os.makedirs(target_parent, exist_ok=True)
+
+            if os.path.normcase(source_file) != os.path.normcase(target_file):
+                if not os.path.isfile(target_file):
+                    try:
+                        shutil.copy2(source_file, target_file)
+                    except Exception:
+                        pending_rows.append(cache_row)
+                        continue
+
+            reused_count += 1
+            self.last_copied_files.append(target_name)
+            copied_item = {
+                "relative_file": target_name,
+                "target_name": target_name,
+                "target_dir": save_dir,
+                "video_id": str(cache_row.get("video_id", "")).strip(),
+                "playlist_item": str(cache_row.get("playlist_item", "")).strip(),
+            }
+            self.last_copied_items.append(copied_item)
+            self.cache_store.Upsert_download_state(
+                cache_row.get("video_id", ""),
+                cache_row.get("list_id", ""),
+                cache_row.get("download_type", ""),
+                cache_row.get("playlist_item", ""),
+                cache_row.get("playlist_items", ""),
+                cache_row.get("format_simple", ""),
+                cache_row.get("format_raw", ""),
+                "done",
+                temp_dir=str(old_row.get("temp_dir", "")),
+                temp_file=str(old_row.get("temp_file", "")),
+                target_dir=save_dir,
+                target_name=target_name,
+                bytes_downloaded=str(old_row.get("bytes_downloaded", "0")),
+                bytes_total=str(old_row.get("bytes_total", "0")),
+                last_progress="100",
+                auto_save=True,
+            )
+
+        return pending_rows, reused_count
 
     def Download_finished(self, save_dir):
         for cache_row in self.current_download_cache_rows:
