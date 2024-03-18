@@ -89,7 +89,7 @@ def build_quality_format(quality):
     return "(bv[ext=mp4][container=mp4_dash]+139)/(bv[ext=mp4]+ba[ext=m4a])/best[ext=mp4]/best"
 
 
-def build_download_options(output_template, quality, download_type, progress_hook, playlist_items=""):
+def build_download_options(output_template, quality, download_type, progress_hook, playlist_items="", download_subtitles=False, video_language=""):
     ydl_opts = {
         "format": build_quality_format(quality),
         "outtmpl": output_template,
@@ -101,6 +101,13 @@ def build_download_options(output_template, quality, download_type, progress_hoo
         "overwrites": False,
         "merge_output_format": "mp4",
     }
+
+    if download_subtitles:
+        ydl_opts["writesubtitles"] = True
+        ydl_opts["writeautomaticsub"] = True
+        ydl_opts["subtitleslangs"] = build_subtitle_languages(video_language)
+        ydl_opts["subtitlesformat"] = "srt/best"
+        ydl_opts["embedsubtitles"] = True
 
     if download_type == "playlist":
         ydl_opts["ignoreerrors"] = True

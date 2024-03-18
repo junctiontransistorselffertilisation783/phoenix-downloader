@@ -232,6 +232,8 @@ class DownloadingThread(QThread):
             download_type=self.download_type,
             progress_hook=self.progress_hook,
             playlist_items=self.playlist_items,
+            download_subtitles=self.download_subtitles,
+            video_language=self.video_language,
         )
 
     def Handle_subtitle_pass_options(self, output_template, subtitle_options):
@@ -286,9 +288,6 @@ class DownloadingThread(QThread):
             info_dict = d.get("info_dict", {})
             is_subtitle_file = self.Is_subtitle_file(info_dict)
             temp_file = d.get("tmpfilename") or d.get("filename") or ""
-
-            if not is_subtitle_file:
-                self.Start_subtitles_background()
 
             total_bytes = d.get("total_bytes")
             total_estimate = d.get("total_bytes_estimate")
@@ -563,6 +562,9 @@ class DownloadingThread(QThread):
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: # pyright: ignore[reportArgumentType]
                 ydl.download([self.url])
+
+            if self.download_subtitles:
+                self.Cleanup_subtitle_orig_files(temp_output_template)
 
             self.status_changed.emit("Copying final files")
             copied_count = 0
