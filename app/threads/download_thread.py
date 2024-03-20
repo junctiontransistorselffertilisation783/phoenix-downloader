@@ -21,6 +21,7 @@ class DownloadingThread(QThread):
     progress_changed = pyqtSignal(int)
     status_changed = pyqtSignal(str)
     details_changed = pyqtSignal(str)
+    title_changed = pyqtSignal(str)
     download_finished = pyqtSignal(str)
     download_failed = pyqtSignal(str)
     download_cancelled = pyqtSignal()
@@ -345,11 +346,11 @@ class DownloadingThread(QThread):
                 playlist_index = info_dict.get("playlist_index")
                 playlist_count = info_dict.get("n_entries") or info_dict.get("playlist_count")
                 if playlist_index and playlist_count:
-                    status_prefix = f"Item {playlist_index} of {playlist_count}"
+                    status_prefix = f"Video {playlist_index}/{playlist_count}"
 
             title_text = str(info_dict.get("title", "")).strip()
-            if title_text:
-                detail_parts.insert(0, title_text)
+            if title_text and not is_subtitle_file:
+                self.title_changed.emit(title_text)
 
             if is_subtitle_file:
                 detail_parts.insert(0, "Subtitle file")
@@ -391,6 +392,9 @@ class DownloadingThread(QThread):
                     self.last_global_progress = 99
                 self.progress_changed.emit(self.last_global_progress)
                 self.status_changed.emit("Finalizing file")
+                title_text = str(info_dict.get("title", "")).strip()
+                if title_text != "":
+                    self.title_changed.emit(title_text)
                 self.details_changed.emit("Merging audio and video, then saving the final file")
                 self.Handle_cache_emit(info_dict, "downloading", output_filename, 0, 0, self.last_global_progress)
 

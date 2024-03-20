@@ -59,6 +59,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.thumbnail_label = self.Thumbnail_label
         self.status_label = self.Display_videoName
         self.progress_details_label = self.label_4
+        self.progressBar.setFormat("%p%")
 
         self.quality_label = self.label_3
         self.info_group = self.Thumbnail_label
@@ -1202,6 +1203,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.download_thread.progress_changed.connect(self.Update_progress)
         self.download_thread.status_changed.connect(self.Update_status)
         self.download_thread.details_changed.connect(self.Update_progress_details)
+        self.download_thread.title_changed.connect(self.Update_download_title)
         self.download_thread.download_finished.connect(self.Download_finished)
         self.download_thread.download_failed.connect(self.Download_failed)
         self.download_thread.download_cancelled.connect(self.Download_cancelled)
@@ -1237,7 +1239,10 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.progressBar.setValue(value)
 
     def Update_status(self, text):
-        self.status_label.setText(text)
+        self.progressBar.setFormat(str(text or "%p%"))
+
+    def Update_download_title(self, text):
+        self.status_label.setText(str(text or ""))
 
     def Update_progress_details(self, text):
         self.progress_details_label.setText(text)
@@ -1441,6 +1446,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.last_copied_items = []
         self.status_label.setText("Ready")
         self.progress_details_label.setText("")
+        self.progressBar.setFormat("%p%")
         self.downloadButton.setEnabled(False)
         self.Set_download_controls(False)
         self.Set_inputs_enabled(True)
@@ -1470,6 +1476,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.last_copied_items = []
         self.status_label.setText("Download failed")
         self.progress_details_label.setText("The download stopped before the file could be saved")
+        self.progressBar.setFormat("%p%")
         self.downloadButton.setEnabled(True)
         self.Set_download_controls(False)
         self.Set_inputs_enabled(True)
@@ -1495,6 +1502,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.last_copied_items = []
         self.status_label.setText("Download cancelled")
         self.progressBar.setValue(0)
+        self.progressBar.setFormat("%p%")
         self.progress_details_label.setText("The active download was cancelled")
         self.downloadButton.setEnabled(True)
         self.Set_download_controls(False)
