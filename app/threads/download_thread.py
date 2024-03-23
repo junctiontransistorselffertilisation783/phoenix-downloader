@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled
 from PyQt5.QtCore import QThread, pyqtSignal
+from app.cache.download_cache_store import DownloadCacheStore
 from app.utils.helpers import handle_num, format_bytes, format_seconds, safe_name
 from app.ytdlp.core import (
     build_download_options,
@@ -672,9 +673,21 @@ class DownloadingThread(QThread):
         keep_days = 10
         hard_delete_days = 30
         max_bytes = 10 * 1024 * 1024 * 1024
-        keep_floor_bytes = 1024 * 1024 * 1024
+        keep_floor_bytes = 800 * 1024 * 1024
         keep_seconds = keep_days * 86400
         hard_seconds = hard_delete_days * 86400
+
+        cache_store = DownloadCacheStore()
+        cache_store.Load()
+        progress_by_temp_dir = {}
+        for row in cache_store.rows_by_key.values():
+            temp_dir_text = str(row.get("temp_dir", "")).strip()
+            if temp_dir_text == "":
+                continue
+            last_progress = handle_num(row.get("last_progress", 0))
+            old_progress = progress_by_temp_dir.get(temp_dir_text, 0)
+            if last_progress > old_progress:
+                progress_by_temp_dir[temp_dir_text] = last_progress
 
         folder_items = []
         total_bytes = 0
@@ -725,6 +738,7 @@ class DownloadingThread(QThread):
                     "newest": newest_time,
                     "newest_part": newest_part_time,
                     "part_bytes": part_bytes,
+                    "last_progress": progress_by_temp_dir.get(folder_path, 0),
                 }
             )
             total_bytes += folder_bytes
@@ -753,6 +767,8 @@ class DownloadingThread(QThread):
                     continue
                 if item["newest_part"] > 0 and (now_time - float(item["newest_part"])) < keep_seconds:
                     continue
+                if int(item.get("last_progress", 0)) >= 50:
+                    continue
                 try:
                     shutil.rmtree(folder_path, ignore_errors=True)
                 except Exception:
@@ -767,17 +783,22 @@ class DownloadingThread(QThread):
             if not os.path.isdir(folder_path):
                 continue
             age_seconds = now_time - float(item["newest"])
-            progress_score = 0
-            if item["bytes"] > 0:
-                progress_score = int((float(item["part_bytes"]) / float(item["bytes"])) * 100)
-            candidates.append((progress_score, age_seconds, item))
+            progress_score = int(item.get("last_progress", 0))
+            progress_group = 3
+            if progress_score < 25:
+                progress_group = 0
+            elif progress_score < 50:
+                progress_group = 1
+            elif progress_score < 75:
+                progress_group = 2
+            candidates.append((progress_group, -age_seconds, progress_score, item))
 
-        candidates.sort(key=lambda value: (value[0], -value[1]))
+        candidates.sort(key=lambda value: (value[0], value[1], value[2]))
 
-        for progress_score, _age_seconds, item in candidates:
+        for progress_group, _age_sort, progress_score, item in candidates:
             if total_bytes <= keep_floor_bytes:
                 break
-            if progress_score >= 50:
+            if progress_group >= 3 and total_bytes <= max_bytes:
                 continue
             folder_path = item["path"]
             try:
