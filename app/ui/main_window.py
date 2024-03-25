@@ -1066,7 +1066,11 @@ class MainApp(QMainWindow, Ui_MainWindow):
                 if preferred_available:
                     subtitle_hint = subtitle_hint + f" | preferred found: {', '.join(preferred_available)}"
 
-            self.progress_details_label.setText(f"Channel: {uploader} | Duration: {duration_text} | lang={language} | {subtitle_hint}")
+            details_text = f"Channel: {uploader} | Duration: {duration_text} | lang={language} | {subtitle_hint}"
+            if self.Is_playlist_context_url(self.Get_url_text()):
+                details_text = f"Video from playlist loaded | {details_text}"
+
+            self.progress_details_label.setText(details_text)
             self.Update_download_button_text()
 
     def Handle_info_failed(self, request_id, error_text):

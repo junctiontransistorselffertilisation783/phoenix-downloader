@@ -1,5 +1,6 @@
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import yt_dlp
 from PyQt5.QtCore import QThread, pyqtSignal
@@ -25,6 +26,27 @@ class DownloadInfoThread(QThread):
     def Is_stopped(self):
         return bool(self.stop_requested)
 
+    def Handle_video_only_url(self, url):
+        url_text = str(url or "").strip()
+        if url_text == "":
+            return ""
+
+        try:
+            parsed = urlparse(url_text)
+            query = parse_qs(parsed.query)
+        except Exception:
+            return url_text
+
+        keep_query = {}
+        for key in ["v", "t", "start"]:
+            values = query.get(key, [])
+            clean_values = [str(value).strip() for value in values if str(value).strip() != ""]
+            if len(clean_values) > 0:
+                keep_query[key] = clean_values
+
+        new_query = urlencode(keep_query, doseq=True)
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+
     def run(self):
         try:
             if self.Is_stopped():
@@ -43,8 +65,10 @@ class DownloadInfoThread(QThread):
                 self.Handle_playlist_entries_enrich(videos_dict)
                 return
             else:
+                ydl_opts["noplaylist"] = True
+                info_url = self.Handle_video_only_url(self.url)
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl: # type: ignore
-                    info_dict = ydl.extract_info(self.url, download=False)
+                    info_dict = ydl.extract_info(info_url, download=False)
                 videos_dict = self.Handle_video_info(info_dict)
 
             if self.Is_stopped():
