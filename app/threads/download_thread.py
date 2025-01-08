@@ -10,6 +10,13 @@ import yt_dlp
 from yt_dlp.utils import DownloadCancelled
 from PyQt5.QtCore import QThread, pyqtSignal
 from app.cache.download_cache_store import DownloadCacheStore
+from app.config import (
+    Get_temp_media_dir,
+    TEMP_HARD_DELETE_DAYS,
+    TEMP_KEEP_DAYS,
+    TEMP_KEEP_FLOOR_BYTES,
+    TEMP_MAX_BYTES,
+)
 from app.utils.helpers import handle_num, format_bytes, format_seconds, safe_name
 from app.ytdlp.core import (
     build_download_options,
@@ -511,12 +518,7 @@ class DownloadingThread(QThread):
             self.details_changed.emit("Connecting to YouTube and preparing the selected format")
 
             os.makedirs(self.save_dir, exist_ok=True)
-            local_app_data = os.getenv("LOCALAPPDATA", "")
-            if local_app_data == "":
-                local_app_data = os.path.expanduser("~")
-
-            temp_root = os.path.join(local_app_data, "PhoenixDownloader", "temp_media")
-            os.makedirs(temp_root, exist_ok=True)
+            temp_root = Get_temp_media_dir()
 
             video_id = ""
             try:
@@ -661,19 +663,15 @@ class DownloadingThread(QThread):
             self.Handle_cleanup_temp_cache(self.temp_work_dir)
 
     def Handle_cleanup_temp_cache(self, active_temp_dir=""):
-        local_app_data = os.getenv("LOCALAPPDATA", "")
-        if local_app_data == "":
-            local_app_data = os.path.expanduser("~")
-
-        temp_root = os.path.join(local_app_data, "PhoenixDownloader", "temp_media")
+        temp_root = Get_temp_media_dir()
         if not os.path.isdir(temp_root):
             return
 
         now_time = time.time()
-        keep_days = 10
-        hard_delete_days = 30
-        max_bytes = 10 * 1024 * 1024 * 1024
-        keep_floor_bytes = 800 * 1024 * 1024
+        keep_days = TEMP_KEEP_DAYS
+        hard_delete_days = TEMP_HARD_DELETE_DAYS
+        max_bytes = TEMP_MAX_BYTES
+        keep_floor_bytes = TEMP_KEEP_FLOOR_BYTES
         keep_seconds = keep_days * 86400
         hard_seconds = hard_delete_days * 86400
 

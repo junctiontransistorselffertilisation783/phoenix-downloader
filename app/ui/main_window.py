@@ -8,6 +8,7 @@ from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 
 from app.cache.download_cache_store import DownloadCacheStore
+from app.config import APP_DIR_NAME, APP_SETTINGS_NAME, Get_default_downloads_dir
 from app.threads.download_thread import DownloadingThread
 from app.threads.get_info_thread import DownloadInfoThread
 from app.ui.ui_downloader import Ui_MainWindow
@@ -38,7 +39,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.current_video_language = "unknown"
         self.last_loaded_url = ""
         self.default = True
-        self.settings = QSettings("PhoenixDownloader", "PhoenixDownloaderApp")
+        self.settings = QSettings(APP_DIR_NAME, APP_SETTINGS_NAME)
         self.auto_info_timer = QTimer(self)
         self.auto_info_timer.setSingleShot(True)
         self.auto_info_timer.timeout.connect(self.Handle_auto_get_video_info)
@@ -267,7 +268,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         if saved_folder and os.path.isdir(saved_folder):
             return saved_folder
 
-        return os.path.join(os.path.expanduser("~"), "Downloads")
+        return Get_default_downloads_dir()
 
     def Load_saved_data(self):
         saved_urls = self.settings.value("recent_urls", [], type=list)

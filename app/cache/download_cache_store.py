@@ -1,7 +1,7 @@
 import csv
 import hashlib
-import os
 from datetime import datetime
+from app.config import Get_cache_file_path
 
 
 class DownloadCacheStore:
@@ -10,13 +10,7 @@ class DownloadCacheStore:
         self.cache_file_path = self.Build_cache_file_path()
 
     def Build_cache_file_path(self):
-        base_dir = os.getenv("LOCALAPPDATA", "")
-        if base_dir == "":
-            base_dir = os.path.expanduser("~")
-
-        app_dir = os.path.join(base_dir, "PhoenixDownloader")
-        os.makedirs(app_dir, exist_ok=True)
-        return os.path.join(app_dir, "download_cache.csv")
+        return Get_cache_file_path()
 
     def Handle_now_text(self):
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
