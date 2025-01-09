@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlparse
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled
 from PyQt5.QtCore import QThread, pyqtSignal
-from app.cache.download_cache_store import DownloadCacheStore
+from app.core.download_cache_store import DownloadCacheStore
 from app.config import (
     Get_temp_media_dir,
     TEMP_HARD_DELETE_DAYS,

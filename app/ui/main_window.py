@@ -7,10 +7,10 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 
-from app.cache.download_cache_store import DownloadCacheStore
+from app.core.download_cache_store import DownloadCacheStore
 from app.config import APP_DIR_NAME, APP_SETTINGS_NAME, Get_default_downloads_dir
-from app.threads.download_thread import DownloadingThread
-from app.threads.get_info_thread import DownloadInfoThread
+from app.workers.download_thread import DownloadingThread
+from app.workers.get_info_thread import DownloadInfoThread
 from app.ui.ui_downloader import Ui_MainWindow
 from app.ytdlp.core import build_quality_format
 
