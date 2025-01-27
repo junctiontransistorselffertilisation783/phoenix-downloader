@@ -4,7 +4,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import yt_dlp
 from PyQt5.QtCore import QThread, pyqtSignal
-from app.ytdlp.core import build_playlist_info, build_quality_items, build_video_info
+from app.core.ytdlp import build_playlist_info, build_quality_items, build_video_info
 
 
 class DownloadInfoThread(QThread):

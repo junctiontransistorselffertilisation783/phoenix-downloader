@@ -18,7 +18,7 @@ from app.config import (
     TEMP_MAX_BYTES,
 )
 from app.utils.helpers import handle_num, format_bytes, format_seconds, safe_name
-from app.ytdlp.core import (
+from app.core.ytdlp import (
     build_download_options,
     build_subtitle_download_options,
     build_subtitle_passes,

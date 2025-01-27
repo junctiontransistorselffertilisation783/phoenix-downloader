@@ -12,7 +12,7 @@ from app.config import APP_DIR_NAME, APP_SETTINGS_NAME, Get_default_downloads_di
 from app.workers.download_thread import DownloadingThread
 from app.workers.get_info_thread import DownloadInfoThread
 from app.ui.ui_downloader import Ui_MainWindow
-from app.ytdlp.core import build_quality_format
+from app.core.ytdlp import build_quality_format
 
 
 class MainApp(QMainWindow, Ui_MainWindow):
