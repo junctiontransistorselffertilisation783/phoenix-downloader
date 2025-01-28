@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import *
 
 from app.core.download_cache_store import DownloadCacheStore
 from app.config import APP_DIR_NAME, APP_SETTINGS_NAME, Get_default_downloads_dir
+from app.models.download_job import DownloadJob
 from app.workers.download_thread import DownloadingThread
 from app.workers.get_info_thread import DownloadInfoThread
 from app.ui.ui_downloader import Ui_MainWindow
@@ -1169,23 +1170,24 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.Set_download_controls(True)
         self.Set_inputs_enabled(False)
 
-        self.download_thread = DownloadingThread(
-            download_url,
-            save_dir,
-            quality,
-            download_type,
-            playlist_title,
-            len(self.playlist_entries) if download_type == "playlist" else 0,
-            playlist_count_for_prefix if download_type == "playlist" else 0,
-            playlist_items if download_type == "playlist" else "",
-            self.Add_Prefix_checkBox.isChecked() if download_type == "playlist" else False,
-            self.prefix_no_cmbx.currentIndex() if download_type == "playlist" else 0,
-            self.Add_Suffix_checkBox.isChecked(),
-            self.Suffix_lineEdit.text(),
-            self.subtitle_checkBox.isChecked(),
-            self.chapters_checkBox.isChecked(),
-            self.current_video_language,
+        download_job = DownloadJob(
+            url=download_url,
+            save_dir=save_dir,
+            quality=quality,
+            download_type=download_type,
+            playlist_title=playlist_title,
+            playlist_count=len(self.playlist_entries) if download_type == "playlist" else 0,
+            playlist_selected_count=playlist_count_for_prefix if download_type == "playlist" else 0,
+            playlist_items=playlist_items if download_type == "playlist" else "",
+            add_prefix=self.Add_Prefix_checkBox.isChecked() if download_type == "playlist" else False,
+            prefix_mode=self.prefix_no_cmbx.currentIndex() if download_type == "playlist" else 0,
+            add_suffix=self.Add_Suffix_checkBox.isChecked(),
+            suffix_text=self.Suffix_lineEdit.text(),
+            download_subtitles=self.subtitle_checkBox.isChecked(),
+            download_chapters=self.chapters_checkBox.isChecked(),
+            video_language=self.current_video_language,
         )
+        self.download_thread = DownloadingThread(download_job)
 
         self.current_download_cache_rows = cache_rows
         self.last_copied_files = []

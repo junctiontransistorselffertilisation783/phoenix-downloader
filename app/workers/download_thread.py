@@ -10,6 +10,7 @@ import yt_dlp
 from yt_dlp.utils import DownloadCancelled
 from PyQt5.QtCore import QThread, pyqtSignal
 from app.core.download_cache_store import DownloadCacheStore
+from app.models.download_job import DownloadJob
 from app.config import (
     Get_temp_media_dir,
     TEMP_HARD_DELETE_DAYS,
@@ -36,40 +37,24 @@ class DownloadingThread(QThread):
     files_copied = pyqtSignal(object)
     cache_progress = pyqtSignal(object)
 
-    def __init__(
-        self,
-        url,
-        save_dir,
-        quality,
-        download_type="video",
-        playlist_title="",
-        playlist_count=0,
-        playlist_selected_count=0,
-        playlist_items="",
-        add_prefix=False,
-        prefix_mode=0,
-        add_suffix=False,
-        suffix_text="",
-        download_subtitles=False,
-        download_chapters=False,
-        video_language="",
-    ):
+    def __init__(self, job: DownloadJob):
         super().__init__()
-        self.url = url
-        self.save_dir = save_dir
-        self.quality = quality
-        self.download_type = download_type
-        self.playlist_title = playlist_title
-        self.playlist_count = int(playlist_count or 0)
-        self.playlist_selected_count = int(playlist_selected_count or 0)
-        self.playlist_items = str(playlist_items or "").strip()
-        self.add_prefix = bool(add_prefix)
-        self.prefix_mode = int(prefix_mode or 0)
-        self.add_suffix = bool(add_suffix)
-        self.suffix_text = str(suffix_text or "")
-        self.download_subtitles = download_subtitles
-        self.download_chapters = download_chapters
-        self.video_language = video_language
+        self.job = job
+        self.url = str(job.url or "")
+        self.save_dir = str(job.save_dir or "")
+        self.quality = str(job.quality or "")
+        self.download_type = str(job.download_type or "video")
+        self.playlist_title = str(job.playlist_title or "")
+        self.playlist_count = int(job.playlist_count or 0)
+        self.playlist_selected_count = int(job.playlist_selected_count or 0)
+        self.playlist_items = str(job.playlist_items or "").strip()
+        self.add_prefix = bool(job.add_prefix)
+        self.prefix_mode = int(job.prefix_mode or 0)
+        self.add_suffix = bool(job.add_suffix)
+        self.suffix_text = str(job.suffix_text or "")
+        self.download_subtitles = bool(job.download_subtitles)
+        self.download_chapters = bool(job.download_chapters)
+        self.video_language = str(job.video_language or "")
         self.stop_requested = False
         self.chapter_targets = {}
         self.subtitle_thread = None
