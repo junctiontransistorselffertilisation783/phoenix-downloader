@@ -5,6 +5,7 @@ APP_DIR_NAME = "PhoenixDownloader"
 APP_SETTINGS_NAME = "PhoenixDownloaderApp"
 TEMP_MEDIA_DIR_NAME = "temp_media"
 CACHE_FILE_NAME = "download_cache.csv"
+DB_FILE_NAME = "phoenix_downloader.db"
 DEFAULT_DOWNLOADS_FOLDER_NAME = "Downloads"
 
 TEMP_KEEP_DAYS = 10
@@ -34,6 +35,10 @@ def Get_temp_media_dir():
 
 def Get_cache_file_path():
     return os.path.join(Get_app_data_dir(), CACHE_FILE_NAME)
+
+
+def Get_db_file_path():
+    return os.path.join(Get_app_data_dir(), DB_FILE_NAME)
 
 
 def Get_default_downloads_dir():
