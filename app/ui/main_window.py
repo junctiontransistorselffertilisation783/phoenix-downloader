@@ -7,7 +7,7 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 
-from app.core.download_cache_store import DownloadCacheStore
+from app.repositories.download_state_store import DownloadStateStore
 from app.config import APP_DIR_NAME, APP_SETTINGS_NAME, Get_default_downloads_dir
 from app.models.download_job import DownloadJob
 from app.workers.download_thread import DownloadingThread
@@ -28,7 +28,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.current_download_cache_rows = []
         self.last_copied_files = []
         self.last_copied_items = []
-        self.cache_store = DownloadCacheStore()
+        self.cache_store = DownloadStateStore()
         self.cache_store.Load()
         self.video_info_loaded = False
         self.current_info_type = "video"
