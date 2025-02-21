@@ -1340,7 +1340,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
                 pending_rows.append(cache_row)
                 continue
 
-            old_row = self.cache_store.rows_by_key.get(cache_key, {})
+            old_row = self.cache_store.Get_row_by_cache_key(cache_key)
             if str(old_row.get("state", "")).lower() != "done":
                 pending_rows.append(cache_row)
                 continue

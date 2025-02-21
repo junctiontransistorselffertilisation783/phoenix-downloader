@@ -17,6 +17,15 @@ class DownloadStateStore:
     def Handle_now_text(self):
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    def Handle_int_value(self, value, default_value=0):
+        try:
+            value_text = str(value or "").strip()
+            if value_text == "":
+                return int(default_value)
+            return int(float(value_text))
+        except Exception:
+            return int(default_value)
+
     def Build_cache_key(self, video_id, list_id, download_type, playlist_item, format_simple):
         video_text = str(video_id or "").strip()
         list_text = str(list_id or "").strip()
@@ -110,9 +119,9 @@ class DownloadStateStore:
                     str(row.get("temp_file", "")),
                     str(row.get("target_dir", "")),
                     str(row.get("target_name", "")),
-                    int(str(row.get("bytes_downloaded", "0") or "0") or 0),
-                    int(str(row.get("bytes_total", "0") or "0") or 0),
-                    int(str(row.get("last_progress", "0") or "0") or 0),
+                    self.Handle_int_value(row.get("bytes_downloaded", "0"), 0),
+                    self.Handle_int_value(row.get("bytes_total", "0"), 0),
+                    self.Handle_int_value(row.get("last_progress", "0"), 0),
                     str(row.get("last_error", "")),
                     str(row.get("created_at", "")),
                     str(row.get("state_changed_at", "")),
@@ -170,6 +179,30 @@ class DownloadStateStore:
 
     def Save(self):
         return
+
+    def Get_row_by_cache_key(self, cache_key):
+        key_text = str(cache_key or "").strip()
+        if key_text == "":
+            return {}
+        return dict(self.rows_by_key.get(key_text, {}))
+
+    def Get_temp_progress_map(self):
+        progress_by_temp_dir = {}
+        with Get_db_connection() as connection:
+            cursor = connection.execute(
+                """
+                SELECT temp_dir, MAX(last_progress) as max_progress
+                FROM download_state
+                WHERE temp_dir != ''
+                GROUP BY temp_dir
+                """
+            )
+            for row in cursor.fetchall():
+                temp_dir_text = str(row["temp_dir"] or "").strip()
+                if temp_dir_text == "":
+                    continue
+                progress_by_temp_dir[temp_dir_text] = self.Handle_int_value(row["max_progress"], 0)
+        return progress_by_temp_dir
 
     def Upsert_download_state(
         self,

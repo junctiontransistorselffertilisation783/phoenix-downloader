@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlparse
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled
 from PyQt5.QtCore import QThread, pyqtSignal
-from app.core.download_cache_store import DownloadCacheStore
+from app.repositories.download_state_store import DownloadStateStore
 from app.models.download_job import DownloadJob
 from app.config import (
     Get_temp_media_dir,
@@ -660,17 +660,9 @@ class DownloadingThread(QThread):
         keep_seconds = keep_days * 86400
         hard_seconds = hard_delete_days * 86400
 
-        cache_store = DownloadCacheStore()
+        cache_store = DownloadStateStore()
         cache_store.Load()
-        progress_by_temp_dir = {}
-        for row in cache_store.rows_by_key.values():
-            temp_dir_text = str(row.get("temp_dir", "")).strip()
-            if temp_dir_text == "":
-                continue
-            last_progress = handle_num(row.get("last_progress", 0))
-            old_progress = progress_by_temp_dir.get(temp_dir_text, 0)
-            if last_progress > old_progress:
-                progress_by_temp_dir[temp_dir_text] = last_progress
+        progress_by_temp_dir = cache_store.Get_temp_progress_map()
 
         folder_items = []
         total_bytes = 0
