@@ -8,7 +8,8 @@ from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 
 from app.repositories.download_state_store import DownloadStateStore
-from app.config import APP_DIR_NAME, APP_SETTINGS_NAME, Get_default_downloads_dir
+from app.repositories.app_settings_store import AppSettingsStore
+from app.config import Get_default_downloads_dir
 from app.models.download_job import DownloadJob
 from app.workers.download_thread import DownloadingThread
 from app.workers.get_info_thread import DownloadInfoThread
@@ -40,7 +41,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.current_video_language = "unknown"
         self.last_loaded_url = ""
         self.default = True
-        self.settings = QSettings(APP_DIR_NAME, APP_SETTINGS_NAME)
+        self.settings_store = AppSettingsStore()
         self.auto_info_timer = QTimer(self)
         self.auto_info_timer.setSingleShot(True)
         self.auto_info_timer.timeout.connect(self.Handle_auto_get_video_info)
@@ -265,14 +266,14 @@ class MainApp(QMainWindow, Ui_MainWindow):
         return self.path_input.currentText().strip()
 
     def Get_default_folder(self):
-        saved_folder = self.settings.value("last_folder", "")
+        saved_folder = self.settings_store.Get_value("last_folder", "")
         if saved_folder and os.path.isdir(saved_folder):
             return saved_folder
 
         return Get_default_downloads_dir()
 
     def Load_saved_data(self):
-        saved_urls = self.settings.value("recent_urls", [], type=list)
+        saved_urls = self.settings_store.Get_list("recent_urls")
         if saved_urls is None:
             saved_urls = []
 
@@ -284,7 +285,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.url_input.setCurrentText("")
         self.url_input.blockSignals(False)
 
-        saved_paths = self.settings.value("recent_paths", [], type=list)
+        saved_paths = self.settings_store.Get_list("recent_paths")
         if saved_paths is None:
             saved_paths = []
 
@@ -304,14 +305,14 @@ class MainApp(QMainWindow, Ui_MainWindow):
         if url == "":
             return
 
-        saved_urls = self.settings.value("recent_urls", [], type=list)
+        saved_urls = self.settings_store.Get_list("recent_urls")
         if saved_urls is None:
             saved_urls = []
 
         saved_urls = [saved_url for saved_url in saved_urls if saved_url != url]
         saved_urls.insert(0, url)
         saved_urls = saved_urls[:15]
-        self.settings.setValue("recent_urls", saved_urls)
+        self.settings_store.Set_list("recent_urls", saved_urls)
 
         self.url_input.blockSignals(True)
         self.url_input.clear()
@@ -325,16 +326,16 @@ class MainApp(QMainWindow, Ui_MainWindow):
         if folder == "":
             return
 
-        self.settings.setValue("last_folder", folder)
+        self.settings_store.Set_value("last_folder", folder)
 
-        saved_paths = self.settings.value("recent_paths", [], type=list)
+        saved_paths = self.settings_store.Get_list("recent_paths")
         if saved_paths is None:
             saved_paths = []
 
         saved_paths = [saved_path for saved_path in saved_paths if saved_path != folder]
         saved_paths.insert(0, folder)
         saved_paths = saved_paths[:15]
-        self.settings.setValue("recent_paths", saved_paths)
+        self.settings_store.Set_list("recent_paths", saved_paths)
 
         self.path_input.blockSignals(True)
         self.path_input.clear()
