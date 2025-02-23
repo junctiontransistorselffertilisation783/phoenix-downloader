@@ -1,7 +1,6 @@
 import os
 import re
 import shutil
-from urllib.parse import parse_qs, urlparse
 
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
@@ -9,12 +8,14 @@ from PyQt5.QtWidgets import *
 
 from app.repositories.download_state_store import DownloadStateStore
 from app.repositories.app_settings_store import AppSettingsStore
+from app.services.downloader_service import DownloaderService
 from app.config import Get_default_downloads_dir
 from app.models.download_job import DownloadJob
 from app.workers.download_thread import DownloadingThread
 from app.workers.get_info_thread import DownloadInfoThread
 from app.ui.ui_downloader import Ui_MainWindow
 from app.core.ytdlp import build_quality_format
+from app.utils.helpers import detect_url_type, is_youtube_url, normalize_url, parse_youtube_url
 
 
 class MainApp(QMainWindow, Ui_MainWindow):
@@ -31,6 +32,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.last_copied_items = []
         self.cache_store = DownloadStateStore()
         self.cache_store.Load()
+        self.downloader_service = DownloaderService(self.cache_store)
         self.video_info_loaded = False
         self.current_info_type = "video"
         self.is_downloading = False
@@ -350,230 +352,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.path_input.setCurrentText(folder)
             self.Save_folder_history()
 
-    def Detect_url_type(self, url):
-        parsed_info = self.Handle_parse_youtube_url(url)
-        if not parsed_info["is_youtube"]:
-            return "video"
-
-        has_list = parsed_info["has_list"]
-        has_video = parsed_info["has_video"]
-        path_type = parsed_info["path_type"]
-
-        if has_list and has_video:
-            return "mixed"
-
-        if path_type == "playlist" and has_list:
-            return "playlist"
-
-        if has_list and not has_video:
-            return "playlist"
-
-        return "video"
-
-    def Is_youtube_url(self, url):
-        parsed_info = self.Handle_parse_youtube_url(url)
-        return parsed_info["is_youtube"]
-
-    def Handle_normalize_url(self, url):
-        url_text = str(url or "").strip()
-        if url_text == "":
-            return ""
-        if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", url_text):
-            return f"https://{url_text}"
-        return url_text
-
-    def Handle_parse_youtube_url(self, url):
-        url_text = self.Handle_normalize_url(url)
-        if url_text == "":
-            return {
-                "is_youtube": False,
-                "has_list": False,
-                "has_video": False,
-                "path_type": "unknown",
-                "query": {},
-            }
-
-        try:
-            parsed = urlparse(url_text)
-        except Exception:
-            return {
-                "is_youtube": False,
-                "has_list": False,
-                "has_video": False,
-                "path_type": "unknown",
-                "query": {},
-            }
-
-        host = str(parsed.netloc or "").lower()
-        if host.startswith("www."):
-            host = host[4:]
-
-        allowed_hosts = {
-            "youtube.com",
-            "m.youtube.com",
-            "music.youtube.com",
-            "youtu.be",
-            "youtube-nocookie.com",
-        }
-        is_youtube = host in allowed_hosts
-
-        query = parse_qs(parsed.query)
-        list_values = query.get("list", [])
-        video_values = query.get("v", [])
-
-        has_list = any(str(value).strip() != "" for value in list_values)
-        has_video = any(str(value).strip() != "" for value in video_values)
-
-        path_value = str(parsed.path or "").lower()
-        path_type = "unknown"
-        if path_value.startswith("/playlist"):
-            path_type = "playlist"
-        elif path_value.startswith("/watch"):
-            path_type = "watch"
-        elif path_value.startswith("/live/"):
-            path_type = "live"
-        elif host == "youtu.be" and path_value.strip("/") != "":
-            path_type = "short_watch"
-            has_video = True
-
-        if path_type in {"watch", "live", "short_watch"} and not has_video:
-            has_video = True
-
-        return {
-            "is_youtube": is_youtube,
-            "has_list": has_list,
-            "has_video": has_video,
-            "path_type": path_type,
-            "query": query,
-            "path_value": path_value,
-        }
-
-    def Handle_video_id_from_url(self, url):
-        parsed_info = self.Handle_parse_youtube_url(url)
-        query = parsed_info.get("query", {})
-        v_values = query.get("v", [])
-        if len(v_values) > 0:
-            video_id = str(v_values[0]).strip()
-            if video_id != "":
-                return video_id
-
-        if parsed_info.get("path_type") == "short_watch":
-            path_value = str(parsed_info.get("path_value", ""))
-            return path_value.strip("/").strip()
-
-        return ""
-
-    def Handle_list_id_from_url(self, url):
-        parsed_info = self.Handle_parse_youtube_url(url)
-        query = parsed_info.get("query", {})
-        list_values = query.get("list", [])
-        if len(list_values) > 0:
-            list_id = str(list_values[0]).strip()
-            if list_id != "":
-                return list_id
-        return ""
-
-    def Handle_simple_format_text(self, quality):
-        quality_text = str(quality or "").strip()
-        if quality_text == "":
-            return "unknown"
-
-        match = re.search(r"\b(\d{2,4})\b", quality_text)
-        if match:
-            return match.group(1)
-
-        lower_text = quality_text.lower()
-        if "audio" in lower_text:
-            return "audio"
-        if "best" in lower_text:
-            return "best"
-        return "custom"
-
-    def Handle_video_id_from_entry(self, entry):
-        webpage_url = str(entry.get("webpage_url", "")).strip()
-        if webpage_url != "":
-            video_id = self.Handle_video_id_from_url(webpage_url)
-            if video_id != "":
-                return video_id
-        return ""
-
-    def Handle_selected_playlist_indexes(self, playlist_items, total_count):
-        if str(playlist_items).strip() == "":
-            return list(range(1, max(0, int(total_count)) + 1))
-
-        selected_numbers = set()
-        text_items = [part.strip() for part in str(playlist_items).split(",") if part.strip() != ""]
-        for text_item in text_items:
-            if text_item.isdigit():
-                selected_numbers.add(int(text_item))
-                continue
-            if "-" in text_item:
-                left_right = text_item.split("-", 1)
-                if len(left_right) != 2:
-                    continue
-                left_text = left_right[0].strip()
-                right_text = left_right[1].strip()
-                if (not left_text.isdigit()) or (not right_text.isdigit()):
-                    continue
-                left = int(left_text)
-                right = int(right_text)
-                if right < left:
-                    left, right = right, left
-                for value in range(left, right + 1):
-                    selected_numbers.add(value)
-
-        filtered = [value for value in sorted(selected_numbers) if 1 <= value <= int(total_count)]
-        return filtered
-
-    def Build_download_cache_rows(self, download_url, download_type, quality, playlist_items):
-        rows = []
-        format_raw = str(quality or "")
-        format_simple = self.Handle_simple_format_text(quality)
-        list_id = self.Handle_list_id_from_url(download_url)
-        target_dir = self.Get_save_path_text()
-
-        if download_type == "playlist":
-            total_count = len(self.playlist_entries)
-            selected_indexes = self.Handle_selected_playlist_indexes(playlist_items, total_count)
-            if len(selected_indexes) == 0:
-                selected_indexes = list(range(1, total_count + 1))
-
-            for index_value in selected_indexes:
-                if index_value < 1 or index_value > len(self.playlist_entries):
-                    continue
-                entry = self.playlist_entries[index_value - 1]
-                video_id = self.Handle_video_id_from_entry(entry)
-                rows.append(
-                    {
-                        "video_id": video_id,
-                        "list_id": list_id,
-                        "download_type": "playlist",
-                        "playlist_item": str(index_value),
-                        "playlist_items": str(playlist_items or ""),
-                        "format_simple": format_simple,
-                        "format_raw": format_raw,
-                        "target_dir": target_dir,
-                    }
-                )
-            return rows
-
-        video_id = self.Handle_video_id_from_url(download_url)
-        rows.append(
-            {
-                "video_id": video_id,
-                "list_id": list_id,
-                "download_type": "video",
-                "playlist_item": "",
-                "playlist_items": "",
-                "format_simple": format_simple,
-                "format_raw": format_raw,
-                "target_dir": target_dir,
-            }
-        )
-        return rows
-
     def Is_playlist_context_url(self, url):
-        parsed_info = self.Handle_parse_youtube_url(url)
+        parsed_info = parse_youtube_url(url)
         return parsed_info["is_youtube"] and parsed_info["has_list"]
 
     def Set_thumbnail_data(self, thumbnail_data):
@@ -711,14 +491,14 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return
 
         url = self.Get_url_text()
-        if not self.Is_youtube_url(url):
+        if not is_youtube_url(url):
             self.auto_info_timer.stop()
             return
 
         if url == self.last_loaded_url and self.video_info_loaded:
             return
 
-        normalized_url = self.Handle_normalize_url(url)
+        normalized_url = normalize_url(url)
         if normalized_url != "" and self.loading_info_url == normalized_url:
             return
 
@@ -732,7 +512,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         if url == "":
             return
 
-        if not self.Is_youtube_url(url):
+        if not is_youtube_url(url):
             return
 
         if url == self.last_loaded_url and self.video_info_loaded:
@@ -741,7 +521,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.Handle_get_video_info()
 
     def Is_info_request_ready(self, url):
-        normalized_url = self.Handle_normalize_url(url)
+        normalized_url = normalize_url(url)
         if normalized_url == "":
             return False
 
@@ -917,7 +697,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
             QMessageBox.warning(self, "URL Needed", "Enter YouTube URL first")
             return
 
-        if not self.Is_youtube_url(url):
+        if not is_youtube_url(url):
             QMessageBox.warning(self, "Invalid URL", "Please enter a valid YouTube URL")
             return
 
@@ -926,7 +706,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
 
         self.Cancel_info_thread()
 
-        url_type = self.Detect_url_type(url)
+        url_type = detect_url_type(url)
         effective_url_type = "video" if url_type == "mixed" else url_type
         request_id = self.Next_info_request_id()
         self.get_info_btn.setEnabled(False)
@@ -937,7 +717,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         else:
             self.progress_details_label.setText("Reading media details and available formats")
 
-        normalized_url = self.Handle_normalize_url(url)
+        normalized_url = normalize_url(url)
         self.loading_info_url = normalized_url
         self.loading_request_id = request_id
         self.info_thread = DownloadInfoThread(url, effective_url_type, request_id, self.Thumbnail_checkBox.isChecked())
@@ -1139,10 +919,24 @@ class MainApp(QMainWindow, Ui_MainWindow):
             QMessageBox.warning(self, "Download Not Ready", str(error))
             return
 
-        cache_rows = self.Build_download_cache_rows(download_url, download_type, quality, playlist_items)
+        cache_rows = self.downloader_service.Build_download_cache_rows(
+            download_url,
+            download_type,
+            quality,
+            playlist_items,
+            save_dir,
+            self.playlist_entries,
+        )
         cache_rows, reused_count = self.Handle_reuse_done_file(cache_rows, save_dir)
         if len(cache_rows) == 0 and reused_count > 0:
-            self.current_download_cache_rows = self.Build_download_cache_rows(download_url, download_type, quality, playlist_items)
+            self.current_download_cache_rows = self.downloader_service.Build_download_cache_rows(
+                download_url,
+                download_type,
+                quality,
+                playlist_items,
+                save_dir,
+                self.playlist_entries,
+            )
             self.Download_finished(save_dir)
             return
         if download_type == "playlist" and len(cache_rows) > 0:
