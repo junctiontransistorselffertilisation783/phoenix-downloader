@@ -1,6 +1,4 @@
 import os
-import re
-import shutil
 
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
@@ -9,13 +7,14 @@ from PyQt5.QtWidgets import *
 from app.repositories.download_state_store import DownloadStateStore
 from app.repositories.app_settings_store import AppSettingsStore
 from app.services.downloader_service import DownloaderService
+from app.services.download_files_service import DownloadFilesService
 from app.config import Get_default_downloads_dir
 from app.models.download_job import DownloadJob
 from app.workers.download_thread import DownloadingThread
 from app.workers.get_info_thread import DownloadInfoThread
 from app.ui.ui_downloader import Ui_MainWindow
 from app.core.ytdlp import build_quality_format
-from app.utils.helpers import detect_url_type, is_youtube_url, normalize_url, parse_youtube_url
+from app.utils.helpers import build_copied_item, detect_url_type, is_youtube_url, normalize_url, parse_youtube_url
 
 
 class MainApp(QMainWindow, Ui_MainWindow):
@@ -33,6 +32,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.cache_store = DownloadStateStore()
         self.cache_store.Load()
         self.downloader_service = DownloaderService(self.cache_store)
+        self.download_files_service = DownloadFilesService(self.cache_store)
         self.video_info_loaded = False
         self.current_info_type = "video"
         self.is_downloading = False
@@ -579,113 +579,6 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.downloadButton.setEnabled(bool(entry_quality_items))
         self.progress_details_label.setText("Selected video quality will be used for full playlist with fallback")
 
-    def Build_playlist_quality_from_selection(self):
-        selected_text = self.quality_comboBox.currentText().strip().lower()
-        match = re.search(r"(\d{3,4})p", selected_text)
-        if match:
-            height_value = int(match.group(1))
-            return build_quality_format(f"{height_value}p")
-
-        match = re.search(r"(\d{3,4})x(\d{3,4})", selected_text)
-        if match:
-            height_value = int(match.group(2))
-            if height_value <= 240:
-                return build_quality_format("240p")
-            if height_value <= 480:
-                return build_quality_format("480p")
-            if height_value <= 720:
-                return build_quality_format("720p")
-            return build_quality_format("Best")
-
-        data_value = self.quality_comboBox.currentData()
-        if isinstance(data_value, str) and data_value.strip() != "":
-            return data_value
-
-        return build_quality_format("720p")
-
-    def Handle_Playlist_items_range(self):
-        total_count = max(0, int(self.playlist_count or len(self.playlist_entries)))
-        if total_count <= 0:
-            return "", 0
-
-        if self.CurrentVideo_checkBox.isChecked() and self.selected_playlist_entry is not None:
-            index_value = int(self.selected_playlist_entry.get("index", 0))
-            if 1 <= index_value <= total_count:
-                return str(index_value), 1
-
-        if not self.Plst_Range_checkBox.isChecked():
-            return "", total_count
-
-        start = self.Range_start_spnbx.value()
-        end = self.Range_end_spnbx.value()
-        if end < start:
-            start, end = end, start
-
-        start = max(1, min(total_count, int(start)))
-        end = max(1, min(total_count, int(end)))
-
-        items_ranges = [f"{start}-{end}"]
-        items_nums = []
-        items_count = self.Items_Range_cmbx.count()
-
-        for i in range(items_count):
-            item = self.Items_Range_cmbx.itemText(i).strip().replace(" ", "")
-            if item == "":
-                continue
-            if item.isdigit():
-                value = int(item)
-                if 1 <= value <= total_count:
-                    items_nums.append(str(value))
-            elif "-" in item:
-                parts = item.split("-")
-                if (len(parts) == 2) and (parts[0].isdigit()) and (parts[1].isdigit()):
-                    left = int(parts[0])
-                    right = int(parts[1])
-                    if right < left:
-                        left, right = right, left
-                    left = max(1, min(total_count, left))
-                    right = max(1, min(total_count, right))
-                    if right >= left:
-                        items_ranges.append(f"{left}-{right}")
-
-        current_item = self.Items_Range_cmbx.currentText().strip().replace(" ", "")
-        if current_item != "":
-            if current_item.isdigit():
-                value = int(current_item)
-                if 1 <= value <= total_count:
-                    items_nums.append(str(value))
-            elif "-" in current_item:
-                parts = current_item.split("-")
-                if (len(parts) == 2) and (parts[0].isdigit()) and (parts[1].isdigit()):
-                    left = int(parts[0])
-                    right = int(parts[1])
-                    if right < left:
-                        left, right = right, left
-                    left = max(1, min(total_count, left))
-                    right = max(1, min(total_count, right))
-                    if right >= left:
-                        items_ranges.append(f"{left}-{right}")
-
-        all_items = items_nums + items_ranges
-        unique_items = []
-        seen_items = set()
-        selected_numbers = set()
-        for item in all_items:
-            if item not in seen_items:
-                unique_items.append(item)
-                seen_items.add(item)
-            if "-" in item:
-                left, right = item.split("-", 1)
-                for number_value in range(int(left), int(right) + 1):
-                    selected_numbers.add(number_value)
-            elif item.isdigit():
-                selected_numbers.add(int(item))
-
-        if len(unique_items) == 0:
-            return "", total_count
-
-        return ",".join(unique_items), len(selected_numbers)
-
     def Handle_get_video_info(self):
         self.auto_info_timer.stop()
         if self.is_downloading:
@@ -871,34 +764,6 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.progress_details_label.setText("Could not read this URL")
         QMessageBox.critical(self, "Error", f"Could not load video info:\n{error_text}")
 
-    def Build_download_request(self):
-        url = self.Get_url_text()
-        download_type = "video"
-        playlist_title = ""
-        playlist_count_for_prefix = 0
-        playlist_items = ""
-        quality = self.quality_comboBox.currentData()
-        if quality is None or quality == "":
-            quality = self.quality_comboBox.currentText().strip()
-
-        if self.Audio_Only_checkBox.isChecked():
-            quality = "Audio only (139)"
-
-        if self.current_info_type == "playlist":
-            if self.selected_playlist_entry is None:
-                raise ValueError("Select playlist video index first")
-            download_type = "playlist"
-            playlist_title = self.playlist_title
-            total_playlist_count = max(0, int(self.playlist_count or len(self.playlist_entries)))
-            playlist_items, selected_count = self.Handle_Playlist_items_range()
-            playlist_count_for_prefix = total_playlist_count
-            if self.prefix_no_cmbx.currentIndex() == 1 and selected_count > 0:
-                playlist_count_for_prefix = selected_count
-            if not self.Audio_Only_checkBox.isChecked():
-                quality = self.Build_playlist_quality_from_selection()
-
-        return url, download_type, playlist_title, quality, playlist_count_for_prefix, playlist_items
-
     def Handle_download(self):
         save_dir = self.Get_save_path_text()
         if self.Get_url_text() == "":
@@ -914,7 +779,26 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return
 
         try:
-            download_url, download_type, playlist_title, quality, playlist_count_for_prefix, playlist_items = self.Build_download_request()
+            range_items = [self.Items_Range_cmbx.itemText(i) for i in range(self.Items_Range_cmbx.count())]
+            download_url, download_type, playlist_title, quality, playlist_count_for_prefix, playlist_items = self.downloader_service.Build_download_request(
+                {
+                    "url": self.Get_url_text(),
+                    "quality_data": self.quality_comboBox.currentData(),
+                    "quality_text": self.quality_comboBox.currentText(),
+                    "audio_only": self.Audio_Only_checkBox.isChecked(),
+                    "current_info_type": self.current_info_type,
+                    "selected_playlist_entry": self.selected_playlist_entry,
+                    "playlist_title": self.playlist_title,
+                    "playlist_count": max(0, int(self.playlist_count or len(self.playlist_entries))),
+                    "current_checked": self.CurrentVideo_checkBox.isChecked(),
+                    "range_checked": self.Plst_Range_checkBox.isChecked(),
+                    "range_start": self.Range_start_spnbx.value(),
+                    "range_end": self.Range_end_spnbx.value(),
+                    "range_items": range_items,
+                    "current_range_text": self.Items_Range_cmbx.currentText(),
+                    "prefix_mode": self.prefix_no_cmbx.currentIndex(),
+                }
+            )
         except ValueError as error:
             QMessageBox.warning(self, "Download Not Ready", str(error))
             return
@@ -927,7 +811,10 @@ class MainApp(QMainWindow, Ui_MainWindow):
             save_dir,
             self.playlist_entries,
         )
-        cache_rows, reused_count = self.Handle_reuse_done_file(cache_rows, save_dir)
+        cache_rows, reused_count, self.last_copied_files, self.last_copied_items = self.download_files_service.Handle_reuse_done_file(
+            cache_rows,
+            save_dir,
+        )
         if len(cache_rows) == 0 and reused_count > 0:
             self.current_download_cache_rows = self.downloader_service.Build_download_cache_rows(
                 download_url,
@@ -986,22 +873,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
 
         self.current_download_cache_rows = cache_rows
         self.last_copied_files = []
-        for cache_row in self.current_download_cache_rows:
-            self.cache_store.Upsert_download_state(
-                cache_row.get("video_id", ""),
-                cache_row.get("list_id", ""),
-                cache_row.get("download_type", ""),
-                cache_row.get("playlist_item", ""),
-                cache_row.get("playlist_items", ""),
-                cache_row.get("format_simple", ""),
-                cache_row.get("format_raw", ""),
-                "queued",
-                temp_dir="",
-                temp_file="",
-                target_dir=cache_row.get("target_dir", save_dir),
-                target_name="",
-                auto_save=True,
-            )
+        self.downloader_service.Handle_mark_rows_state(self.current_download_cache_rows, "queued", save_dir=save_dir)
         self.download_thread.progress_changed.connect(self.Update_progress)
         self.download_thread.status_changed.connect(self.Update_status)
         self.download_thread.details_changed.connect(self.Update_progress_details)
@@ -1013,22 +885,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.download_thread.cache_progress.connect(self.Handle_download_cache_progress)
         self.download_thread.start()
 
-        for cache_row in self.current_download_cache_rows:
-            self.cache_store.Upsert_download_state(
-                cache_row.get("video_id", ""),
-                cache_row.get("list_id", ""),
-                cache_row.get("download_type", ""),
-                cache_row.get("playlist_item", ""),
-                cache_row.get("playlist_items", ""),
-                cache_row.get("format_simple", ""),
-                cache_row.get("format_raw", ""),
-                "downloading",
-                temp_dir="",
-                temp_file="",
-                target_dir=cache_row.get("target_dir", save_dir),
-                target_name="",
-                auto_save=True,
-            )
+        self.downloader_service.Handle_mark_rows_state(self.current_download_cache_rows, "downloading", save_dir=save_dir)
 
     def Handle_cancel_download(self):
         if self.download_thread and self.download_thread.isRunning():
@@ -1067,179 +924,20 @@ class MainApp(QMainWindow, Ui_MainWindow):
             if file_text == "":
                 continue
             self.last_copied_files.append(file_text)
-            self.last_copied_items.append(
-                {
-                    "relative_file": file_text,
-                    "target_name": file_text,
-                    "target_dir": self.Get_save_path_text(),
-                    "video_id": "",
-                    "playlist_item": "",
-                }
-            )
+            self.last_copied_items.append(build_copied_item(file_text, self.Get_save_path_text()))
 
     def Handle_download_cache_progress(self, data):
         if not isinstance(data, dict):
             return
-
-        video_id = str(data.get("video_id", "")).strip()
-        playlist_item = str(data.get("playlist_item", "")).strip()
-        state_text = str(data.get("state", "downloading")).strip() or "downloading"
-        temp_dir = str(data.get("temp_dir", "")).strip()
-        temp_file = str(data.get("temp_file", "")).strip()
-        bytes_downloaded = str(data.get("bytes_downloaded", "0")).strip() or "0"
-        bytes_total = str(data.get("bytes_total", "0")).strip() or "0"
-        last_progress = str(data.get("last_progress", "0")).strip() or "0"
-
-        for cache_row in self.current_download_cache_rows:
-            row_video_id = str(cache_row.get("video_id", "")).strip()
-            row_playlist_item = str(cache_row.get("playlist_item", "")).strip()
-            if video_id != "" and row_video_id != video_id:
-                continue
-            if playlist_item != "" and row_playlist_item != playlist_item:
-                continue
-
-            self.cache_store.Upsert_download_state(
-                cache_row.get("video_id", ""),
-                cache_row.get("list_id", ""),
-                cache_row.get("download_type", ""),
-                cache_row.get("playlist_item", ""),
-                cache_row.get("playlist_items", ""),
-                cache_row.get("format_simple", ""),
-                cache_row.get("format_raw", ""),
-                state_text,
-                temp_dir=temp_dir,
-                temp_file=temp_file,
-                target_dir=cache_row.get("target_dir", ""),
-                target_name=cache_row.get("target_name", ""),
-                bytes_downloaded=bytes_downloaded,
-                bytes_total=bytes_total,
-                last_progress=last_progress,
-                auto_save=True,
-            )
-
-    def Handle_reuse_done_file(self, cache_rows, save_dir):
-        pending_rows = []
-        reused_count = 0
-        self.last_copied_files = []
-        self.last_copied_items = []
-
-        for cache_row in cache_rows:
-            cache_key = self.cache_store.Build_cache_key(
-                cache_row.get("video_id", ""),
-                cache_row.get("list_id", ""),
-                cache_row.get("download_type", ""),
-                cache_row.get("playlist_item", ""),
-                cache_row.get("format_simple", ""),
-            )
-            if cache_key == "":
-                pending_rows.append(cache_row)
-                continue
-
-            old_row = self.cache_store.Get_row_by_cache_key(cache_key)
-            if str(old_row.get("state", "")).lower() != "done":
-                pending_rows.append(cache_row)
-                continue
-
-            target_name = str(old_row.get("target_name", "")).strip()
-            if target_name == "":
-                pending_rows.append(cache_row)
-                continue
-
-            source_file = ""
-            old_target_dir = str(old_row.get("target_dir", "")).strip()
-            if old_target_dir != "":
-                old_target_file = os.path.join(old_target_dir, target_name)
-                if os.path.isfile(old_target_file):
-                    source_file = old_target_file
-
-            if source_file == "":
-                old_temp_file = str(old_row.get("temp_file", "")).strip()
-                if old_temp_file != "" and os.path.isfile(old_temp_file):
-                    source_file = old_temp_file
-
-            if source_file == "":
-                pending_rows.append(cache_row)
-                continue
-
-            os.makedirs(save_dir, exist_ok=True)
-            target_file = os.path.join(save_dir, target_name)
-            target_parent = os.path.dirname(target_file)
-            if target_parent != "":
-                os.makedirs(target_parent, exist_ok=True)
-
-            if os.path.normcase(source_file) != os.path.normcase(target_file):
-                if not os.path.isfile(target_file):
-                    try:
-                        shutil.copy2(source_file, target_file)
-                    except Exception:
-                        pending_rows.append(cache_row)
-                        continue
-
-            reused_count += 1
-            self.last_copied_files.append(target_name)
-            copied_item = {
-                "relative_file": target_name,
-                "target_name": target_name,
-                "target_dir": save_dir,
-                "video_id": str(cache_row.get("video_id", "")).strip(),
-                "playlist_item": str(cache_row.get("playlist_item", "")).strip(),
-            }
-            self.last_copied_items.append(copied_item)
-            self.cache_store.Upsert_download_state(
-                cache_row.get("video_id", ""),
-                cache_row.get("list_id", ""),
-                cache_row.get("download_type", ""),
-                cache_row.get("playlist_item", ""),
-                cache_row.get("playlist_items", ""),
-                cache_row.get("format_simple", ""),
-                cache_row.get("format_raw", ""),
-                "done",
-                temp_dir=str(old_row.get("temp_dir", "")),
-                temp_file=str(old_row.get("temp_file", "")),
-                target_dir=save_dir,
-                target_name=target_name,
-                bytes_downloaded=str(old_row.get("bytes_downloaded", "0")),
-                bytes_total=str(old_row.get("bytes_total", "0")),
-                last_progress="100",
-                auto_save=True,
-            )
-
-        return pending_rows, reused_count
+        self.downloader_service.Handle_progress_update(self.current_download_cache_rows, data)
 
     def Download_finished(self, save_dir):
-        for cache_row in self.current_download_cache_rows:
-            target_name_text = ""
-            row_video_id = str(cache_row.get("video_id", "")).strip()
-            row_playlist_item = str(cache_row.get("playlist_item", "")).strip()
-            for copied_item in self.last_copied_items:
-                copied_video_id = str(copied_item.get("video_id", "")).strip()
-                copied_playlist_item = str(copied_item.get("playlist_item", "")).strip()
-                if row_video_id != "" and copied_video_id != "" and row_video_id != copied_video_id:
-                    continue
-                if row_playlist_item != "" and copied_playlist_item != "" and row_playlist_item != copied_playlist_item:
-                    continue
-                target_name_text = str(copied_item.get("target_name", "")).strip()
-                if target_name_text != "":
-                    break
-
-            if target_name_text == "" and len(self.last_copied_files) == 1:
-                target_name_text = str(self.last_copied_files[0]).strip()
-
-            self.cache_store.Upsert_download_state(
-                cache_row.get("video_id", ""),
-                cache_row.get("list_id", ""),
-                cache_row.get("download_type", ""),
-                cache_row.get("playlist_item", ""),
-                cache_row.get("playlist_items", ""),
-                cache_row.get("format_simple", ""),
-                cache_row.get("format_raw", ""),
-                "done",
-                temp_dir="",
-                temp_file="",
-                target_dir=save_dir,
-                target_name=target_name_text,
-                auto_save=True,
-            )
+        self.downloader_service.Handle_finish_update(
+            self.current_download_cache_rows,
+            self.last_copied_items,
+            self.last_copied_files,
+            save_dir,
+        )
         self.Save_url_history(self.Get_url_text())
         self.is_downloading = False
         self.download_thread = None
@@ -1258,19 +956,11 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.Set_empty_info_state()
 
     def Download_failed(self, error_text):
-        for cache_row in self.current_download_cache_rows:
-            self.cache_store.Upsert_download_state(
-                cache_row.get("video_id", ""),
-                cache_row.get("list_id", ""),
-                cache_row.get("download_type", ""),
-                cache_row.get("playlist_item", ""),
-                cache_row.get("playlist_items", ""),
-                cache_row.get("format_simple", ""),
-                cache_row.get("format_raw", ""),
-                "failed",
-                last_error=str(error_text or ""),
-                auto_save=True,
-            )
+        self.downloader_service.Handle_mark_rows_state(
+            self.current_download_cache_rows,
+            "failed",
+            last_error=str(error_text or ""),
+        )
         self.is_downloading = False
         self.download_thread = None
         self.current_download_cache_rows = []
@@ -1285,18 +975,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         QMessageBox.critical(self, "Error", f"Download failed:\n{error_text}")
 
     def Download_cancelled(self):
-        for cache_row in self.current_download_cache_rows:
-            self.cache_store.Upsert_download_state(
-                cache_row.get("video_id", ""),
-                cache_row.get("list_id", ""),
-                cache_row.get("download_type", ""),
-                cache_row.get("playlist_item", ""),
-                cache_row.get("playlist_items", ""),
-                cache_row.get("format_simple", ""),
-                cache_row.get("format_raw", ""),
-                "partial",
-                auto_save=True,
-            )
+        self.downloader_service.Handle_mark_rows_state(self.current_download_cache_rows, "partial")
         self.is_downloading = False
         self.download_thread = None
         self.current_download_cache_rows = []

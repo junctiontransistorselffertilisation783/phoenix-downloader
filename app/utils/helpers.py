@@ -251,3 +251,31 @@ def get_selected_playlist_indexes(playlist_items, total_count):
 
     filtered = [value for value in sorted(selected_numbers) if 1 <= value <= int(total_count)]
     return filtered
+
+
+def is_temp_cache_file(file_name):
+    file_name_lower = str(file_name or "").lower()
+    if file_name_lower.endswith(".part"):
+        return True
+    if file_name_lower.endswith(".ytdl"):
+        return True
+    if file_name_lower.endswith(".tmp"):
+        return True
+    return False
+
+
+def is_same_path(path_a, path_b):
+    path_a_text = str(path_a or "")
+    path_b_text = str(path_b or "")
+    return path_a_text != "" and path_b_text != "" and path_a_text.lower() == path_b_text.lower()
+
+
+def build_copied_item(relative_file, target_dir="", video_id="", playlist_item=""):
+    relative_text = str(relative_file or "").strip()
+    return {
+        "relative_file": relative_text,
+        "target_name": relative_text,
+        "target_dir": str(target_dir or ""),
+        "video_id": str(video_id or "").strip(),
+        "playlist_item": str(playlist_item or "").strip(),
+    }
