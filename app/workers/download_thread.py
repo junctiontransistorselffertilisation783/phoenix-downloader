@@ -1,5 +1,4 @@
 import os
-import re
 import threading
 import hashlib
 from urllib.parse import parse_qs, urlparse
@@ -10,11 +9,23 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from app.models.download_job import DownloadJob
 from app.config import Get_temp_media_dir
 from app.services.download_files_service import DownloadFilesService
-from app.utils.helpers import handle_num, format_bytes, format_seconds, safe_name
+from app.utils.helpers import (
+    build_playlist_prefix_template,
+    build_suffix_text,
+    handle_num,
+    format_bytes,
+    format_seconds,
+    is_subtitle_file as check_subtitle_file,
+    safe_name,
+)
 from app.core.ytdlp import (
     build_download_options,
     build_subtitle_download_options,
     build_subtitle_passes,
+    compute_combined_progress,
+    get_progress_item_key,
+    get_progress_stream_key,
+    get_progress_stream_size,
     is_subtitle_error,
 )
 
@@ -61,84 +72,11 @@ class DownloadingThread(QThread):
         self.last_cache_emit = {}
         self.download_files_service = DownloadFilesService()
 
-    def Build_playlist_prefix_template(self):
-        if not self.add_prefix:
-            return ""
-
-        count_for_digits = self.playlist_count
-        if self.prefix_mode == 1 and self.playlist_selected_count > 0:
-            count_for_digits = self.playlist_selected_count
-
-        if count_for_digits >= 100:
-            digits = 3
-        elif count_for_digits >= 10:
-            digits = 2
-        else:
-            digits = 1
-
-        if self.prefix_mode == 1:
-            field_name = "playlist_autonumber"
-        else:
-            field_name = "playlist_index"
-
-        return f"%({field_name})0{digits}d - "
-
-    def Is_subtitle_file(self, info_dict):
-        ext_value = str(info_dict.get("ext", "")).lower()
-        return ext_value in ["vtt", "srt", "ttml", "sbv", "json"]
-
-    def Handle_suffix_text(self):
-        if not self.add_suffix:
-            return ""
-
-        suffix = self.suffix_text.strip()
-        if suffix == "":
-            return ""
-
-        suffix = re.sub(r"[\\/:*?\"<>|]", "-", suffix)
-        suffix = re.sub(r"\s+", " ", suffix).strip()
-        if suffix == "":
-            return ""
-
-        if not suffix.startswith(" "):
-            suffix = f" {suffix}"
-
-        return suffix
-
     def Cancel_download(self):
         self.stop_requested = True
 
-    def Handle_stream_size(self, format_info, duration_seconds):
-        if not isinstance(format_info, dict):
-            return 0
-
-        size_value = format_info.get("filesize")
-        if size_value:
-            return handle_num(size_value)
-
-        size_value = format_info.get("filesize_approx")
-        if size_value:
-            return handle_num(size_value)
-
-        tbr_value = format_info.get("tbr")
-        if tbr_value and duration_seconds:
-            return handle_num((float(tbr_value) * 1000 / 8) * float(duration_seconds))
-
-        return 0
-
-    def Handle_item_key(self, info_dict):
-        video_id = str(info_dict.get("id", "")).strip()
-        if video_id != "":
-            return video_id
-
-        title_text = str(info_dict.get("title", "")).strip()
-        if title_text != "":
-            return f"title::{title_text}"
-
-        return "default-item"
-
     def Ensure_item_state(self, info_dict):
-        item_key = self.Handle_item_key(info_dict)
+        item_key = get_progress_item_key(info_dict)
         if item_key in self.media_progress_state:
             return item_key, self.media_progress_state[item_key]
 
@@ -147,9 +85,9 @@ class DownloadingThread(QThread):
         requested_formats = info_dict.get("requested_formats", [])
         if isinstance(requested_formats, list) and len(requested_formats) > 0:
             for stream_info in requested_formats:
-                expected_total += self.Handle_stream_size(stream_info, duration_seconds)
+                expected_total += get_progress_stream_size(stream_info, duration_seconds)
         else:
-            expected_total = self.Handle_stream_size(info_dict, duration_seconds)
+            expected_total = get_progress_stream_size(info_dict, duration_seconds)
 
         self.media_progress_state[item_key] = {
             "expected_total": expected_total,
@@ -159,58 +97,6 @@ class DownloadingThread(QThread):
             "last_percent": 0,
         }
         return item_key, self.media_progress_state[item_key]
-
-    def Handle_stream_key(self, info_dict):
-        format_id = str(info_dict.get("format_id", "")).strip()
-        if format_id != "":
-            return format_id
-
-        ext_value = str(info_dict.get("ext", "")).strip()
-        if ext_value != "":
-            return ext_value
-
-        return "main-stream"
-
-    def Compute_combined_progress(self, item_state, stream_key, downloaded_now, total_bytes, total_estimate):
-        runtime_stream_total = 0
-        if total_bytes is not None:
-            runtime_stream_total = handle_num(total_bytes)
-        elif total_estimate is not None:
-            runtime_stream_total = handle_num(total_estimate)
-
-        stream_downloaded = item_state["stream_downloaded"]
-        stream_downloaded[stream_key] = max(downloaded_now, stream_downloaded.get(stream_key, 0))
-
-        stream_totals = item_state["stream_totals"]
-        if runtime_stream_total > 0:
-            stream_totals[stream_key] = max(runtime_stream_total, stream_totals.get(stream_key, 0))
-
-        if runtime_stream_total > 0:
-            item_state["runtime_total"] = max(item_state["runtime_total"], runtime_stream_total)
-
-        downloaded_total = sum(handle_num(stream_value) for stream_value in stream_downloaded.values())
-        streams_total_sum = sum(handle_num(total_value) for total_value in stream_totals.values())
-
-        known_total = max(item_state["expected_total"], item_state["runtime_total"], streams_total_sum)
-        if known_total > 0:
-            percent_value = int((downloaded_total / known_total) * 100)
-            if percent_value > 99:
-                percent_value = 99
-            if percent_value < item_state["last_percent"]:
-                percent_value = item_state["last_percent"]
-            item_state["last_percent"] = percent_value
-            return percent_value, downloaded_total, known_total
-
-        fallback_percent = item_state["last_percent"]
-        if runtime_stream_total > 0 and downloaded_now > 0:
-            fallback_percent = int((downloaded_now / runtime_stream_total) * 100)
-            if fallback_percent > 99:
-                fallback_percent = 99
-            if fallback_percent < item_state["last_percent"]:
-                fallback_percent = item_state["last_percent"]
-            item_state["last_percent"] = fallback_percent
-
-        return fallback_percent, downloaded_total, known_total
 
     def Handle_ydl_opts(self, output_template):
         return build_download_options(
@@ -273,7 +159,7 @@ class DownloadingThread(QThread):
         if status == "downloading":
             downloaded = handle_num(d.get("downloaded_bytes", 0))
             info_dict = d.get("info_dict", {})
-            is_subtitle_file = self.Is_subtitle_file(info_dict)
+            is_subtitle_file = check_subtitle_file(info_dict)
             temp_file = d.get("tmpfilename") or d.get("filename") or ""
 
             total_bytes = d.get("total_bytes")
@@ -284,9 +170,9 @@ class DownloadingThread(QThread):
                 total_size = handle_num(total_estimate)
 
             if not is_subtitle_file:
-                stream_key = self.Handle_stream_key(info_dict)
+                stream_key = get_progress_stream_key(info_dict)
                 _item_key, item_state = self.Ensure_item_state(info_dict)
-                percent_value, downloaded_combined, total_combined = self.Compute_combined_progress(
+                percent_value, downloaded_combined, total_combined = compute_combined_progress(
                     item_state,
                     stream_key,
                     downloaded,
@@ -348,7 +234,7 @@ class DownloadingThread(QThread):
 
         if status == "finished":
             info_dict = d.get("info_dict", {})
-            is_subtitle_file = self.Is_subtitle_file(info_dict)
+            is_subtitle_file = check_subtitle_file(info_dict)
             output_filename = d.get("filename")
 
             if (not is_subtitle_file) and output_filename:
@@ -384,53 +270,6 @@ class DownloadingThread(QThread):
                 self.details_changed.emit("Merging audio and video, then saving the final file")
                 self.Handle_cache_emit(info_dict, "downloading", output_filename, 0, 0, self.last_global_progress)
 
-    def Write_chapters_files(self):
-        if not self.chapter_targets:
-            return
-
-        written_count = 0
-        written_paths = set()
-        for output_filename, chapters in self.chapter_targets.items():
-            base_name, _ = os.path.splitext(output_filename)
-            base_name = re.sub(r"\.f\d+$", "", base_name)
-            chapter_file_path = f"{base_name}.pbf"
-            if chapter_file_path in written_paths:
-                continue
-
-            try:
-                with open(chapter_file_path, "w", encoding="utf-8") as chapter_file:
-                    chapter_file.write("[Bookmark]\n")
-                    for index, chapter in enumerate(chapters):
-                        end_time = chapter.get("end_time")
-                        title = str(chapter.get("title", f"Chapter {index + 1}")).replace("*", "-")
-                        if end_time is None:
-                            continue
-                        chapter_file.write(f"{index}={int(float(end_time) * 1000)}*{title}*\n")
-                written_count += 1
-                written_paths.add(chapter_file_path)
-            except Exception:
-                continue
-
-        if written_count > 0:
-            self.status_changed.emit("Chapters files created")
-            self.details_changed.emit(f"Created {written_count} PotPlayer chapter file(s)")
-
-    def Cleanup_subtitle_orig_files(self, output_template):
-        template_dir = os.path.dirname(output_template)
-        if not os.path.isdir(template_dir):
-            return
-
-        try:
-            for name in os.listdir(template_dir):
-                file_name_lower = name.lower()
-                if file_name_lower.endswith("-orig.srt") or file_name_lower.endswith("-orig.vtt"):
-                    try:
-                        os.remove(os.path.join(template_dir, name))
-                    except Exception:
-                        continue
-        except Exception:
-            return
-
     def Run_subtitles_background(self, output_template):
         if (not self.download_subtitles) or self.stop_requested:
             return
@@ -465,7 +304,7 @@ class DownloadingThread(QThread):
                 self.subtitle_fatal_error = error
                 return
 
-        self.Cleanup_subtitle_orig_files(output_template)
+        self.download_files_service.Cleanup_subtitle_orig_files(output_template)
 
     def Start_subtitles_background(self):
         if self.stop_requested:
@@ -486,7 +325,10 @@ class DownloadingThread(QThread):
 
     def Run_chapters_background(self):
         try:
-            self.Write_chapters_files()
+            written_count = self.download_files_service.Write_chapters_files(self.chapter_targets)
+            if written_count > 0:
+                self.status_changed.emit("Chapters files created")
+                self.details_changed.emit(f"Created {written_count} PotPlayer chapter file(s)")
         except Exception:
             return
 
@@ -523,7 +365,7 @@ class DownloadingThread(QThread):
             os.makedirs(temp_work_dir, exist_ok=True)
             self.temp_work_dir = temp_work_dir
 
-            suffix_text = self.Handle_suffix_text()
+            suffix_text = build_suffix_text(self.add_suffix, self.suffix_text)
             if self.download_type == "playlist":
                 folder_title = safe_name(self.playlist_title)
                 if self.playlist_count > 0:
@@ -534,7 +376,12 @@ class DownloadingThread(QThread):
                 os.makedirs(target_playlist_folder, exist_ok=True)
                 os.makedirs(temp_playlist_folder, exist_ok=True)
 
-                prefix_template = self.Build_playlist_prefix_template()
+                prefix_template = build_playlist_prefix_template(
+                    self.add_prefix,
+                    self.prefix_mode,
+                    self.playlist_count,
+                    self.playlist_selected_count,
+                )
                 temp_output_template = os.path.join(temp_playlist_folder, f"{prefix_template}%(title)s{suffix_text}.%(ext)s")
             else:
                 temp_output_template = os.path.join(temp_work_dir, f"%(title)s{suffix_text}.%(ext)s")
@@ -549,7 +396,7 @@ class DownloadingThread(QThread):
                 ydl.download([self.url])
 
             if self.download_subtitles:
-                self.Cleanup_subtitle_orig_files(temp_output_template)
+                self.download_files_service.Cleanup_subtitle_orig_files(temp_output_template)
 
             self.status_changed.emit("Copying final files")
             copied_count, removed_temp_count, copied_relative_files = self.download_files_service.Handle_copy_final_files(

@@ -1,4 +1,4 @@
-from app.utils.helpers import format_duration_unknown
+from app.utils.helpers import format_duration_unknown, handle_num
 
 
 def build_subtitle_profile(info_dict):
@@ -149,6 +149,90 @@ def build_subtitle_download_options(output_template, progress_hook, subtitle_opt
             ydl_opts["playlist_items"] = playlist_items_text
     ydl_opts.update(subtitle_options)
     return ydl_opts
+
+
+def get_progress_stream_size(format_info, duration_seconds):
+    if not isinstance(format_info, dict):
+        return 0
+
+    size_value = format_info.get("filesize")
+    if size_value:
+        return handle_num(size_value)
+
+    size_value = format_info.get("filesize_approx")
+    if size_value:
+        return handle_num(size_value)
+
+    tbr_value = format_info.get("tbr")
+    if tbr_value and duration_seconds:
+        return handle_num((float(tbr_value) * 1000 / 8) * float(duration_seconds))
+
+    return 0
+
+
+def get_progress_item_key(info_dict):
+    video_id = str(info_dict.get("id", "")).strip()
+    if video_id != "":
+        return video_id
+
+    title_text = str(info_dict.get("title", "")).strip()
+    if title_text != "":
+        return f"title::{title_text}"
+
+    return "default-item"
+
+
+def get_progress_stream_key(info_dict):
+    format_id = str(info_dict.get("format_id", "")).strip()
+    if format_id != "":
+        return format_id
+
+    ext_value = str(info_dict.get("ext", "")).strip()
+    if ext_value != "":
+        return ext_value
+
+    return "main-stream"
+
+
+def compute_combined_progress(item_state, stream_key, downloaded_now, total_bytes, total_estimate):
+    runtime_stream_total = 0
+    if total_bytes is not None:
+        runtime_stream_total = handle_num(total_bytes)
+    elif total_estimate is not None:
+        runtime_stream_total = handle_num(total_estimate)
+
+    stream_downloaded = item_state["stream_downloaded"]
+    stream_downloaded[stream_key] = max(downloaded_now, stream_downloaded.get(stream_key, 0))
+
+    stream_totals = item_state["stream_totals"]
+    if runtime_stream_total > 0:
+        stream_totals[stream_key] = max(runtime_stream_total, stream_totals.get(stream_key, 0))
+
+    if runtime_stream_total > 0:
+        item_state["runtime_total"] = max(item_state["runtime_total"], runtime_stream_total)
+
+    downloaded_total = sum(handle_num(stream_value) for stream_value in stream_downloaded.values())
+    streams_total_sum = sum(handle_num(total_value) for total_value in stream_totals.values())
+    known_total = max(item_state["expected_total"], item_state["runtime_total"], streams_total_sum)
+    if known_total > 0:
+        percent_value = int((downloaded_total / known_total) * 100)
+        if percent_value > 99:
+            percent_value = 99
+        if percent_value < item_state["last_percent"]:
+            percent_value = item_state["last_percent"]
+        item_state["last_percent"] = percent_value
+        return percent_value, downloaded_total, known_total
+
+    fallback_percent = item_state["last_percent"]
+    if runtime_stream_total > 0 and downloaded_now > 0:
+        fallback_percent = int((downloaded_now / runtime_stream_total) * 100)
+        if fallback_percent > 99:
+            fallback_percent = 99
+        if fallback_percent < item_state["last_percent"]:
+            fallback_percent = item_state["last_percent"]
+        item_state["last_percent"] = fallback_percent
+
+    return fallback_percent, downloaded_total, known_total
 
 
 def get_size_bytes(format_info, duration_seconds):

@@ -279,3 +279,50 @@ def build_copied_item(relative_file, target_dir="", video_id="", playlist_item="
         "video_id": str(video_id or "").strip(),
         "playlist_item": str(playlist_item or "").strip(),
     }
+
+
+def build_playlist_prefix_template(add_prefix, prefix_mode, playlist_count, playlist_selected_count):
+    if not add_prefix:
+        return ""
+
+    count_for_digits = int(playlist_count or 0)
+    if int(prefix_mode or 0) == 1 and int(playlist_selected_count or 0) > 0:
+        count_for_digits = int(playlist_selected_count or 0)
+
+    if count_for_digits >= 100:
+        digits = 3
+    elif count_for_digits >= 10:
+        digits = 2
+    else:
+        digits = 1
+
+    if int(prefix_mode or 0) == 1:
+        field_name = "playlist_autonumber"
+    else:
+        field_name = "playlist_index"
+
+    return f"%({field_name})0{digits}d - "
+
+
+def build_suffix_text(add_suffix, suffix_text):
+    if not add_suffix:
+        return ""
+
+    suffix = str(suffix_text or "").strip()
+    if suffix == "":
+        return ""
+
+    suffix = re.sub(r"[\/:*?\"<>|]", "-", suffix)
+    suffix = re.sub(r"\s+", " ", suffix).strip()
+    if suffix == "":
+        return ""
+
+    if not suffix.startswith(" "):
+        suffix = f" {suffix}"
+
+    return suffix
+
+
+def is_subtitle_file(info_dict):
+    ext_value = str(info_dict.get("ext", "")).lower()
+    return ext_value in ["vtt", "srt", "ttml", "sbv", "json"]

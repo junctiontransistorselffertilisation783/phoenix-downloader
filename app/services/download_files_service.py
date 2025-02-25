@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import time
 
@@ -278,3 +279,48 @@ class DownloadFilesService:
                 total_bytes -= int(item["bytes"])
             except Exception:
                 continue
+
+    def Write_chapters_files(self, chapter_targets):
+        if not chapter_targets:
+            return 0
+
+        written_count = 0
+        written_paths = set()
+        for output_filename, chapters in chapter_targets.items():
+            base_name, _ = os.path.splitext(output_filename)
+            base_name = re.sub(r"\.f\d+$", "", base_name)
+            chapter_file_path = f"{base_name}.pbf"
+            if chapter_file_path in written_paths:
+                continue
+
+            try:
+                with open(chapter_file_path, "w", encoding="utf-8") as chapter_file:
+                    chapter_file.write("[Bookmark]\n")
+                    for index, chapter in enumerate(chapters):
+                        end_time = chapter.get("end_time")
+                        title = str(chapter.get("title", f"Chapter {index + 1}")).replace("*", "-")
+                        if end_time is None:
+                            continue
+                        chapter_file.write(f"{index}={int(float(end_time) * 1000)}*{title}*\n")
+                written_count += 1
+                written_paths.add(chapter_file_path)
+            except Exception:
+                continue
+
+        return written_count
+
+    def Cleanup_subtitle_orig_files(self, output_template):
+        template_dir = os.path.dirname(output_template)
+        if not os.path.isdir(template_dir):
+            return
+
+        try:
+            for name in os.listdir(template_dir):
+                file_name_lower = name.lower()
+                if file_name_lower.endswith("-orig.srt") or file_name_lower.endswith("-orig.vtt"):
+                    try:
+                        os.remove(os.path.join(template_dir, name))
+                    except Exception:
+                        continue
+        except Exception:
+            return
