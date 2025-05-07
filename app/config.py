@@ -4,8 +4,10 @@ import os
 APP_DIR_NAME = "PhoenixDownloader"
 APP_SETTINGS_NAME = "PhoenixDownloaderApp"
 TEMP_MEDIA_DIR_NAME = "temp_media"
+LOGS_DIR_NAME = "logs"
 CACHE_FILE_NAME = "download_cache.csv"
 DB_FILE_NAME = "phoenix_downloader.db"
+LOG_FILE_NAME = "app.log"
 DEFAULT_DOWNLOADS_FOLDER_NAME = "Downloads"
 
 TEMP_KEEP_DAYS = 10
@@ -39,6 +41,16 @@ def Get_cache_file_path():
 
 def Get_db_file_path():
     return os.path.join(Get_app_data_dir(), DB_FILE_NAME)
+
+
+def Get_logs_dir_path():
+    logs_dir = os.path.join(Get_app_data_dir(), LOGS_DIR_NAME)
+    os.makedirs(logs_dir, exist_ok=True)
+    return logs_dir
+
+
+def Get_log_file_path():
+    return os.path.join(Get_logs_dir_path(), LOG_FILE_NAME)
 
 
 def Get_default_downloads_dir():
