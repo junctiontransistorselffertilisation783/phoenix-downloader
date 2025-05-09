@@ -1,4 +1,5 @@
 import os
+import logging
 
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
@@ -50,6 +51,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.init_ui()
         self.Load_saved_data()
         self.Reset_video_info()
+        logging.getLogger(__name__).info("main window ready")
 
     def init_ui(self):
         self.setupUi(self)
@@ -765,6 +767,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         QMessageBox.critical(self, "Error", f"Could not load video info:\n{error_text}")
 
     def Handle_download(self):
+        logger = logging.getLogger(__name__)
         save_dir = self.Get_save_path_text()
         if self.Get_url_text() == "":
             QMessageBox.warning(self, "URL Needed", "Enter YouTube URL first")
@@ -870,6 +873,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
             video_language=self.current_video_language,
         )
         self.download_thread = DownloadingThread(download_job)
+        logger.info("download queued type=%s quality=%s save_dir=%s", download_type, quality, save_dir)
 
         self.current_download_cache_rows = cache_rows
         self.last_copied_files = []
@@ -888,11 +892,13 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.downloader_service.Handle_mark_rows_state(self.current_download_cache_rows, "downloading", save_dir=save_dir)
 
     def Handle_cancel_download(self):
+        logger = logging.getLogger(__name__)
         if self.download_thread and self.download_thread.isRunning():
             self.status_label.setText("Cancelling download...")
             self.progress_details_label.setText("Stopping the active download job")
             self.cancelButton.setEnabled(False)
             self.download_thread.Cancel_download()
+            logger.info("cancel requested by user")
 
     def Update_progress(self, value):
         self.progressBar.setValue(value)
@@ -932,6 +938,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.downloader_service.Handle_progress_update(self.current_download_cache_rows, data)
 
     def Download_finished(self, save_dir):
+        logger = logging.getLogger(__name__)
         self.downloader_service.Handle_finish_update(
             self.current_download_cache_rows,
             self.last_copied_items,
@@ -954,8 +961,10 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.url_input.setCurrentText("")
         self.last_loaded_url = ""
         self.Set_empty_info_state()
+        logger.info("download finished save_dir=%s copied_files=%s", save_dir, len(self.last_copied_files))
 
     def Download_failed(self, error_text):
+        logger = logging.getLogger(__name__)
         self.downloader_service.Handle_mark_rows_state(
             self.current_download_cache_rows,
             "failed",
@@ -973,8 +982,10 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.Set_download_controls(False)
         self.Set_inputs_enabled(True)
         QMessageBox.critical(self, "Error", f"Download failed:\n{error_text}")
+        logger.info("download failed shown to user")
 
     def Download_cancelled(self):
+        logger = logging.getLogger(__name__)
         self.downloader_service.Handle_mark_rows_state(self.current_download_cache_rows, "partial")
         self.is_downloading = False
         self.download_thread = None
@@ -988,6 +999,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.downloadButton.setEnabled(True)
         self.Set_download_controls(False)
         self.Set_inputs_enabled(True)
+        logger.info("download cancelled")
 
     def closeEvent(self, event):
         self.cache_store.Save()

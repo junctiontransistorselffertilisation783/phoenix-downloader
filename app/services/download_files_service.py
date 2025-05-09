@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import time
+import logging
 
 from app.config import (
     Get_temp_media_dir,
@@ -17,6 +18,7 @@ from app.utils.helpers import build_copied_item, is_same_path, is_temp_cache_fil
 class DownloadFilesService:
     def __init__(self, cache_store=None):
         self.cache_store = cache_store
+        self.logger = logging.getLogger(__name__)
 
     def Handle_reuse_done_file(self, cache_rows, save_dir):
         if self.cache_store is None:
@@ -80,6 +82,7 @@ class DownloadFilesService:
                         continue
 
             reused_count += 1
+            self.logger.info("reused done file: %s", target_name)
             copied_files.append(target_name)
             copied_item = build_copied_item(target_name, save_dir, cache_row.get("video_id", ""), cache_row.get("playlist_item", ""))
             copied_items.append(copied_item)
@@ -143,14 +146,17 @@ class DownloadFilesService:
                     except Exception:
                         pass
                 except Exception:
+                    self.logger.warning("copy failed for file: %s", source_file)
                     continue
 
+        self.logger.info("copy result copied=%s removed_temp=%s", copied_count, removed_temp_count)
         return copied_count, removed_temp_count, copied_relative_files
 
     def Handle_cleanup_temp_cache(self, active_temp_dir=""):
         temp_root = Get_temp_media_dir()
         if not os.path.isdir(temp_root):
             return
+        self.logger.info("cleanup temp cache start active_dir=%s", active_temp_dir)
 
         now_time = time.time()
         keep_seconds = TEMP_KEEP_DAYS * 86400
@@ -279,6 +285,8 @@ class DownloadFilesService:
                 total_bytes -= int(item["bytes"])
             except Exception:
                 continue
+
+        self.logger.info("cleanup temp cache done")
 
     def Write_chapters_files(self, chapter_targets):
         if not chapter_targets:

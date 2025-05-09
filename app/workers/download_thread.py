@@ -1,6 +1,7 @@
 import os
 import threading
 import hashlib
+import logging
 from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
@@ -71,6 +72,7 @@ class DownloadingThread(QThread):
         self.temp_work_dir = ""
         self.last_cache_emit = {}
         self.download_files_service = DownloadFilesService()
+        self.logger = logging.getLogger(__name__)
 
     def Cancel_download(self):
         self.stop_requested = True
@@ -283,6 +285,7 @@ class DownloadingThread(QThread):
                 return
 
             pass_name = subtitle_pass.get("name", "subtitles")
+            self.logger.info("subtitle pass start: %s", pass_name)
             subtitle_pass_options = subtitle_pass.get("options", {})
             if not subtitle_pass_options:
                 continue
@@ -295,13 +298,16 @@ class DownloadingThread(QThread):
                 with yt_dlp.YoutubeDL(subtitle_options) as ydl: # pyright: ignore[reportArgumentType]
                     ydl.download([self.url])
             except DownloadCancelled:
+                self.logger.info("subtitle pass cancelled")
                 return
             except Exception as error:
                 error_text = str(error)
                 if is_subtitle_error(error_text):
                     self.subtitle_errors.append(error_text)
+                    self.logger.info("subtitle optional error: %s", error_text)
                     continue
                 self.subtitle_fatal_error = error
+                self.logger.warning("subtitle fatal error: %s", error_text)
                 return
 
         self.download_files_service.Cleanup_subtitle_orig_files(output_template)
@@ -334,6 +340,7 @@ class DownloadingThread(QThread):
 
     def run(self):
         try:
+            self.logger.info("download thread started type=%s", self.download_type)
             self.status_changed.emit("Preparing download")
             self.details_changed.emit("Connecting to YouTube and preparing the selected format")
 
@@ -408,9 +415,11 @@ class DownloadingThread(QThread):
             if copied_count > 0:
                 self.files_copied.emit(copied_relative_files)
                 self.details_changed.emit(f"Moved {copied_count} file(s) to target and cleared {removed_temp_count} temp file(s)")
+                self.logger.info("copied files=%s removed_temp=%s", copied_count, removed_temp_count)
             else:
                 self.files_copied.emit([])
                 self.details_changed.emit("No new files copied (already exists in target or still partial)")
+                self.logger.info("no files copied from temp workspace")
 
             if self.download_chapters and not self.stop_requested:
                 self.chapter_thread = threading.Thread(
@@ -430,6 +439,7 @@ class DownloadingThread(QThread):
             self.last_global_progress = 100
             self.progress_changed.emit(100)
             self.download_finished.emit(self.save_dir)
+            self.logger.info("download finished save_dir=%s", self.save_dir)
 
             self.Handle_cleanup_temp_cache(self.temp_work_dir)
 
@@ -437,10 +447,12 @@ class DownloadingThread(QThread):
             if self.stop_requested:
                 self.download_cancelled.emit()
                 self.Handle_cleanup_temp_cache(self.temp_work_dir)
+                self.logger.info("download cancelled while handling exception")
                 return
 
             self.download_failed.emit(str(error))
             self.Handle_cleanup_temp_cache(self.temp_work_dir)
+            self.logger.exception("download thread failed")
 
     def Handle_cleanup_temp_cache(self, active_temp_dir=""):
         self.download_files_service.Handle_cleanup_temp_cache(active_temp_dir)
