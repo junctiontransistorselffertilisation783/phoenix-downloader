@@ -1,4 +1,5 @@
 import requests
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -19,6 +20,7 @@ class DownloadInfoThread(QThread):
         self.request_id = int(request_id)
         self.enable_thumbnail = bool(enable_thumbnail)
         self.stop_requested = False
+        self.logger = logging.getLogger(__name__)
 
     def Handle_stop_request(self):
         self.stop_requested = True
@@ -78,6 +80,7 @@ class DownloadInfoThread(QThread):
         except Exception as error:
             if self.Is_stopped():
                 return
+            self.logger.exception("failed to load video info")
             self.info_failed.emit(self.request_id, str(error))
 
     def Handle_video_info(self, info_dict):
@@ -172,7 +175,7 @@ class DownloadInfoThread(QThread):
             if (first_result is not None) and (not self.Is_stopped()):
                 self.update_Entreis.emit(self.request_id, first_result)
         except Exception:
-            pass
+            self.logger.warning("first playlist entry enrich failed")
 
         remaining = [(i + 1, entry_urls[i]) for i in range(1, len(entry_urls))]
 
@@ -195,6 +198,7 @@ class DownloadInfoThread(QThread):
                         if (result is not None) and (not self.Is_stopped()):
                             self.update_Entreis.emit(self.request_id, result)
                     except Exception:
+                        self.logger.warning("playlist entry enrich failed")
                         continue
 
         return
@@ -206,4 +210,5 @@ class DownloadInfoThread(QThread):
                 return response.content
             return None
         except Exception:
+            self.logger.warning("thumbnail download failed")
             return None

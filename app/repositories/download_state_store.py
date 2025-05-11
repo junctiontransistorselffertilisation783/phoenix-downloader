@@ -1,5 +1,6 @@
 import csv
 import hashlib
+import logging
 import os
 from datetime import datetime
 
@@ -13,6 +14,7 @@ class DownloadStateStore:
         self.rows_by_key = {}
         self.cache_file_path = Get_cache_file_path()
         Init_db_tables()
+        self.logger = logging.getLogger(__name__)
 
     def Handle_now_text(self):
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -150,6 +152,7 @@ class DownloadStateStore:
                     fixed_row = self.Normalize_loaded_row(row)
                     self._Insert_or_replace_row(fixed_row)
         except Exception:
+            self.logger.warning("csv migration to sqlite failed")
             return
 
     def Load(self):

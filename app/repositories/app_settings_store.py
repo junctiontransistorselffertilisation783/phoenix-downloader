@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime
 
 from app.core.database import Get_db_connection, Init_db_tables
@@ -7,6 +8,7 @@ from app.core.database import Get_db_connection, Init_db_tables
 class AppSettingsStore:
     def __init__(self):
         Init_db_tables()
+        self.logger = logging.getLogger(__name__)
 
     def Handle_now_text(self):
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -56,6 +58,7 @@ class AppSettingsStore:
             if isinstance(data, list):
                 return data
         except Exception:
+            self.logger.warning("failed to parse list setting key=%s", setting_key)
             return []
         return []
 
