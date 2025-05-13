@@ -10,6 +10,7 @@ from app.repositories.app_settings_store import AppSettingsStore
 from app.services.downloader_service import DownloaderService
 from app.services.download_files_service import DownloadFilesService
 from app.config import Get_default_downloads_dir
+from app.core.errors import DownloadRequestError
 from app.models.download_job import DownloadJob
 from app.workers.download_thread import DownloadingThread
 from app.workers.get_info_thread import DownloadInfoThread
@@ -802,7 +803,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
                     "prefix_mode": self.prefix_no_cmbx.currentIndex(),
                 }
             )
-        except ValueError as error:
+        except DownloadRequestError as error:
             QMessageBox.warning(self, "Download Not Ready", str(error))
             return
 

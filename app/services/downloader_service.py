@@ -1,5 +1,6 @@
 import re
 
+from app.core.errors import DownloadRequestError
 from app.core.ytdlp import build_quality_format
 from app.utils.helpers import (
     get_list_id_from_url,
@@ -174,7 +175,7 @@ class DownloaderService:
         if values.get("current_info_type", "video") == "playlist":
             selected_entry = values.get("selected_playlist_entry")
             if selected_entry is None:
-                raise ValueError("Select playlist video index first")
+                raise DownloadRequestError("Select playlist video index first")
             download_type = "playlist"
             playlist_title = str(values.get("playlist_title", ""))
             total_playlist_count = max(0, int(values.get("playlist_count", 0) or 0))
