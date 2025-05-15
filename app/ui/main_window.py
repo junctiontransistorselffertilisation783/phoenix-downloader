@@ -753,6 +753,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.Update_download_button_text()
 
     def Handle_info_failed(self, request_id, error_text):
+        logger = logging.getLogger(__name__)
         if int(request_id) != int(self.active_info_request_id):
             return
 
@@ -764,8 +765,9 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.last_loaded_url = ""
         self.downloadButton.setEnabled(False)
         self.status_label.setText("Failed to load info")
-        self.progress_details_label.setText("Could not read this URL")
-        QMessageBox.critical(self, "Error", f"Could not load video info:\n{error_text}")
+        self.progress_details_label.setText("Could not read this URL. Check URL and try again.")
+        QMessageBox.critical(self, "Error", "Could not load video info. Please try again.")
+        logger.warning("video info load failed: %s", str(error_text or ""))
 
     def Handle_download(self):
         logger = logging.getLogger(__name__)
@@ -977,13 +979,13 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.last_copied_files = []
         self.last_copied_items = []
         self.status_label.setText("Download failed")
-        self.progress_details_label.setText("The download stopped before the file could be saved")
+        self.progress_details_label.setText("Download stopped before save finished. Try again.")
         self.progressBar.setFormat("%p%")
         self.downloadButton.setEnabled(True)
         self.Set_download_controls(False)
         self.Set_inputs_enabled(True)
-        QMessageBox.critical(self, "Error", f"Download failed:\n{error_text}")
-        logger.info("download failed shown to user")
+        QMessageBox.critical(self, "Error", "Download failed. Check logs for more details.")
+        logger.error("download failed details: %s", str(error_text or ""))
 
     def Download_cancelled(self):
         logger = logging.getLogger(__name__)
