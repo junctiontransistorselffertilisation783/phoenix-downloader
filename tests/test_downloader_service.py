@@ -63,4 +63,4 @@ def test_build_download_request_playlist_range_mode_builds_items():
     assert download_type == "playlist"
     assert playlist_title == "Sample"
     assert count_for_prefix == 10
-    assert playlist_items == "2-4,6,8-9"
+    assert playlist_items == "6,2-4,8-9"

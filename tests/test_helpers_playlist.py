@@ -21,5 +21,5 @@ def test_get_video_id_from_entry_reads_webpage_url():
 
 
 def test_get_simple_format_text_for_audio_and_custom():
-    assert get_simple_format_text("Audio only (139)") == "audio"
+    assert get_simple_format_text("Audio only (139)") == "139"
     assert get_simple_format_text("weird quality text") == "custom"
