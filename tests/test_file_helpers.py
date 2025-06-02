@@ -1,5 +1,6 @@
 from app.utils.helpers import (
     build_suffix_text,
+    clean_log_text,
     is_same_path,
     is_subtitle_file,
     is_temp_cache_file,
@@ -29,3 +30,8 @@ def test_is_temp_cache_file_checks_extensions():
 def test_is_same_path_case_insensitive_compare():
     assert is_same_path("C:/Temp/File.mp4", "c:/temp/file.mp4") is True
     assert is_same_path("", "c:/temp/file.mp4") is False
+
+
+def test_clean_log_text_removes_ansi_and_trims():
+    text = "\x1b[0;31mERROR:\x1b[0m Unable to download subtitles\nfor en"
+    assert clean_log_text(text) == "ERROR: Unable to download subtitles for en"

@@ -2,6 +2,9 @@ import re
 from urllib.parse import parse_qs, urlparse
 
 
+ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+
 def handle_num(value):
     if value is None:
         return 0
@@ -326,3 +329,11 @@ def build_suffix_text(add_suffix, suffix_text):
 def is_subtitle_file(info_dict):
     ext_value = str(info_dict.get("ext", "")).lower()
     return ext_value in ["vtt", "srt", "ttml", "sbv", "json"]
+
+
+def clean_log_text(text, max_length=180):
+    clean_text = ANSI_ESCAPE_RE.sub("", str(text or ""))
+    clean_text = re.sub(r"\s+", " ", clean_text).strip()
+    if max_length > 0 and len(clean_text) > max_length:
+        return clean_text[: max_length - 3].rstrip() + "..."
+    return clean_text

@@ -102,13 +102,6 @@ def build_download_options(output_template, quality, download_type, progress_hoo
         "merge_output_format": "mp4",
     }
 
-    if download_subtitles:
-        ydl_opts["writesubtitles"] = True
-        ydl_opts["writeautomaticsub"] = True
-        ydl_opts["subtitleslangs"] = build_subtitle_languages(video_language)
-        ydl_opts["subtitlesformat"] = "srt/best"
-        ydl_opts["embedsubtitles"] = True
-
     if download_type == "playlist":
         ydl_opts["ignoreerrors"] = True
         playlist_items_text = str(playlist_items or "").strip()

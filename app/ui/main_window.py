@@ -16,7 +16,7 @@ from app.workers.download_thread import DownloadingThread
 from app.workers.get_info_thread import DownloadInfoThread
 from app.ui.ui_downloader import Ui_MainWindow
 from app.core.ytdlp import build_quality_format
-from app.utils.helpers import build_copied_item, detect_url_type, is_youtube_url, normalize_url, parse_youtube_url
+from app.utils.helpers import build_copied_item, clean_log_text, detect_url_type, get_simple_format_text, get_video_id_from_entry, get_video_id_from_url, is_youtube_url, normalize_url, parse_youtube_url
 
 
 class MainApp(QMainWindow, Ui_MainWindow):
@@ -161,6 +161,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.Plst_Range_checkBox.setEnabled(True)
 
         self.Update_download_button_text()
+        if self.video_info_loaded:
+            self.Update_playlist_download_hint()
 
     def Handle_audio_only_mode(self):
         audio_only_checked = self.Audio_Only_checkBox.isChecked()
@@ -437,6 +439,43 @@ class MainApp(QMainWindow, Ui_MainWindow):
             return
         self.downloadButton.setText("Download Video")
 
+    def Get_mixed_playlist_video_id(self):
+        url = self.Get_url_text()
+        parsed_info = parse_youtube_url(url)
+        if parsed_info["has_list"] and parsed_info["has_video"]:
+            return get_video_id_from_url(url)
+        return ""
+
+    def Update_playlist_download_hint(self):
+        if self.current_info_type != "playlist":
+            return
+
+        mixed_video_id = self.Get_mixed_playlist_video_id()
+        if mixed_video_id != "":
+            if self.CurrentVideo_checkBox.isChecked():
+                self.progress_details_label.setText("Video from playlist URL detected. Current video is selected. Uncheck Current Video to download the full playlist")
+                return
+            if self.Plst_Range_checkBox.isChecked():
+                self.progress_details_label.setText("Video from playlist URL detected. Range download is selected")
+                return
+            self.progress_details_label.setText("Video from playlist URL detected. Full playlist will be downloaded. Check Current Video to download only this video")
+            return
+
+        self.progress_details_label.setText("Selected video quality will be used for full playlist with fallback")
+
+    def Reset_playlist_range_state(self, total_count=1):
+        safe_count = max(1, int(total_count or 1))
+        self.Plst_Range_checkBox.setChecked(False)
+        self.CurrentVideo_checkBox.setChecked(False)
+        self.Items_Range_cmbx.clear()
+        self.Range_start_spnbx.setMinimum(1)
+        self.Range_end_spnbx.setMinimum(1)
+        self.Range_start_spnbx.setMaximum(safe_count)
+        self.Range_end_spnbx.setMaximum(safe_count)
+        self.Range_start_spnbx.setValue(1)
+        self.Range_end_spnbx.setValue(safe_count)
+        self.Plst_Range_frame.hide()
+
     def Set_empty_info_state(self):
         self.playlist_entries = []
         self.playlist_title = ""
@@ -444,6 +483,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.playlist_count = 0
         self.current_video_language = "unknown"
         self.video_info_loaded = False
+        self.subtitle_checkBox.setEnabled(True)
+        self.Reset_playlist_range_state()
         self.Set_mode_layout("empty")
         self.info_group.hide()
         self.downloadButton.setEnabled(False)
@@ -536,6 +577,8 @@ class MainApp(QMainWindow, Ui_MainWindow):
     def Populate_playlist_comboBox(self):
         self.Playlist_comboBox.blockSignals(True)
         self.Playlist_comboBox.clear()
+        mixed_video_id = self.Get_mixed_playlist_video_id()
+        selected_combo_index = 0
         for entry in self.playlist_entries:
             index_value = int(entry.get("index", 0))
             entry_title = str(entry.get("title", "")).strip()
@@ -548,10 +591,18 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.Playlist_comboBox.addItem(item_text, index_value)
             item_row = self.Playlist_comboBox.count() - 1
             self.Playlist_comboBox.setItemData(item_row, entry_title, Qt.ToolTipRole)
+            if mixed_video_id != "" and get_video_id_from_entry(entry) == mixed_video_id:
+                selected_combo_index = item_row
         if self.Playlist_comboBox.count() > 0:
-            self.Playlist_comboBox.setCurrentIndex(0)
+            self.Playlist_comboBox.setCurrentIndex(selected_combo_index)
             self.Playlist_comboBox.view().setMinimumWidth(520)
         self.Playlist_comboBox.blockSignals(False)
+
+        if mixed_video_id != "":
+            self.CurrentVideo_checkBox.setChecked(True)
+            self.Plst_Range_checkBox.setChecked(False)
+            self.Handle_playlist_mode_ui()
+
         self.Handle_playlist_selection()
 
     def Handle_playlist_selection(self):
@@ -580,7 +631,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         total_entries = len(self.playlist_entries)
         self.playlist_num_display.setText(f"{selected_index + 1}/{total_entries}")
         self.downloadButton.setEnabled(bool(entry_quality_items))
-        self.progress_details_label.setText("Selected video quality will be used for full playlist with fallback")
+        self.Update_playlist_download_hint()
 
     def Handle_get_video_info(self):
         self.auto_info_timer.stop()
@@ -603,13 +654,13 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.Cancel_info_thread()
 
         url_type = detect_url_type(url)
-        effective_url_type = "video" if url_type == "mixed" else url_type
+        effective_url_type = "playlist" if url_type == "mixed" else url_type
         request_id = self.Next_info_request_id()
         self.get_info_btn.setEnabled(False)
         self.downloadButton.setEnabled(False)
         self.status_label.setText("Loading info...")
         if url_type == "mixed":
-            self.progress_details_label.setText("Detected video inside playlist. Loading as video by default")
+            self.progress_details_label.setText("Detected video inside playlist. Loading playlist and selecting current video")
         else:
             self.progress_details_label.setText("Reading media details and available formats")
 
@@ -697,6 +748,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.playlist_entries = data.get("entries", [])
             playlist_count = data.get("playlist_count", len(self.playlist_entries))
             self.playlist_count = int(playlist_count)
+            self.Reset_playlist_range_state(playlist_count)
 
             self.playlist_num_display.setText("1")
             self.Range_start_spnbx.setMaximum(max(1, int(playlist_count)))
@@ -718,7 +770,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
 
             self.Populate_playlist_comboBox()
             self.status_label.setText(str(title))
-            self.progress_details_label.setText(f"Playlist loaded: {playlist_count} videos. loading first video info...")
+            self.Update_playlist_download_hint()
             self.downloadButton.setEnabled(self.Playlist_comboBox.count() > 0 and self.quality_comboBox.count() > 0)
             self.Update_download_button_text()
         else:
@@ -767,7 +819,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.status_label.setText("Failed to load info")
         self.progress_details_label.setText("Could not read this URL. Check URL and try again.")
         QMessageBox.critical(self, "Error", "Could not load video info. Please try again.")
-        logger.warning("video info load failed: %s", str(error_text or ""))
+        logger.warning("video info load failed: %s", clean_log_text(error_text))
 
     def Handle_download(self):
         logger = logging.getLogger(__name__)
@@ -876,7 +928,15 @@ class MainApp(QMainWindow, Ui_MainWindow):
             video_language=self.current_video_language,
         )
         self.download_thread = DownloadingThread(download_job)
-        logger.info("download queued type=%s quality=%s save_dir=%s", download_type, quality, save_dir)
+        quality_tag = get_simple_format_text(quality)
+        logger.info(
+            "download queued type=%s quality=%s subtitles=%s chapters=%s save_dir=%s",
+            download_type,
+            quality_tag,
+            "on" if self.subtitle_checkBox.isChecked() else "off",
+            "on" if self.chapters_checkBox.isChecked() else "off",
+            save_dir,
+        )
 
         self.current_download_cache_rows = cache_rows
         self.last_copied_files = []
@@ -890,6 +950,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.download_thread.download_cancelled.connect(self.Download_cancelled)
         self.download_thread.files_copied.connect(self.Handle_download_files_copied)
         self.download_thread.cache_progress.connect(self.Handle_download_cache_progress)
+        self.download_thread.subtitle_warning.connect(self.Handle_subtitle_warning)
         self.download_thread.start()
 
         self.downloader_service.Handle_mark_rows_state(self.current_download_cache_rows, "downloading", save_dir=save_dir)
@@ -934,6 +995,13 @@ class MainApp(QMainWindow, Ui_MainWindow):
                 continue
             self.last_copied_files.append(file_text)
             self.last_copied_items.append(build_copied_item(file_text, self.Get_save_path_text()))
+
+    def Handle_subtitle_warning(self, text):
+        self.subtitle_checkBox.setChecked(False)
+        self.subtitle_checkBox.setEnabled(False)
+        warning_text = str(text or "").strip()
+        if warning_text != "":
+            self.progress_details_label.setText(warning_text)
 
     def Handle_download_cache_progress(self, data):
         if not isinstance(data, dict):
@@ -986,7 +1054,7 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.Set_download_controls(False)
         self.Set_inputs_enabled(True)
         QMessageBox.critical(self, "Error", "Download failed. Check logs for more details.")
-        logger.error("download failed details: %s", str(error_text or ""))
+        logger.error("download failed details: %s", clean_log_text(error_text))
 
     def Download_cancelled(self):
         logger = logging.getLogger(__name__)

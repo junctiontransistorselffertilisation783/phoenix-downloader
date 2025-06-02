@@ -13,6 +13,7 @@ from app.services.download_files_service import DownloadFilesService
 from app.utils.helpers import (
     build_playlist_prefix_template,
     build_suffix_text,
+    clean_log_text,
     handle_num,
     format_bytes,
     format_seconds,
@@ -40,6 +41,7 @@ class DownloadingThread(QThread):
     download_cancelled = pyqtSignal()
     files_copied = pyqtSignal(object)
     cache_progress = pyqtSignal(object)
+    subtitle_warning = pyqtSignal(str)
 
     def __init__(self, job: DownloadJob):
         super().__init__()
@@ -304,27 +306,34 @@ class DownloadingThread(QThread):
                 error_text = str(error)
                 if is_subtitle_error(error_text):
                     self.subtitle_errors.append(error_text)
-                    self.logger.info("subtitle optional error: %s", error_text)
+                    self.logger.info("subtitle optional error: %s", clean_log_text(error_text))
                     continue
                 self.subtitle_fatal_error = error
-                self.logger.warning("subtitle fatal error: %s", error_text)
+                self.logger.warning("subtitle fatal error: %s", clean_log_text(error_text))
+                self.status_changed.emit("Media saved")
+                self.details_changed.emit("Subtitle download failed. Video was saved without subtitles")
+                self.subtitle_warning.emit("Subtitle download failed. Video was saved without subtitles.")
                 return
 
         self.download_files_service.Cleanup_subtitle_orig_files(output_template)
+        if len(self.subtitle_errors) > 0:
+            self.status_changed.emit("Media saved")
+            self.details_changed.emit("Some subtitles could not be downloaded. Video was saved and subtitles were disabled")
+            self.subtitle_warning.emit("Some subtitles could not be downloaded. Video was saved without some subtitles.")
 
-    def Start_subtitles_background(self):
+    def Start_subtitles_background(self, output_template):
         if self.stop_requested:
             return
         if not self.download_subtitles:
             return
         if self.subtitle_thread is not None:
             return
-        if self.output_template == "":
+        if str(output_template or "").strip() == "":
             return
 
         self.subtitle_thread = threading.Thread(
             target=self.Run_subtitles_background,
-            args=(self.output_template,),
+            args=(output_template,),
             daemon=True,
         )
         self.subtitle_thread.start()
@@ -340,7 +349,7 @@ class DownloadingThread(QThread):
 
     def run(self):
         try:
-            self.logger.info("download thread started type=%s", self.download_type)
+            self.logger.info("download started type=%s", self.download_type)
             self.status_changed.emit("Preparing download")
             self.details_changed.emit("Connecting to YouTube and preparing the selected format")
 
@@ -390,8 +399,10 @@ class DownloadingThread(QThread):
                     self.playlist_selected_count,
                 )
                 temp_output_template = os.path.join(temp_playlist_folder, f"{prefix_template}%(title)s{suffix_text}.%(ext)s")
+                final_output_template = os.path.join(target_playlist_folder, f"{prefix_template}%(title)s{suffix_text}.%(ext)s")
             else:
                 temp_output_template = os.path.join(temp_work_dir, f"%(title)s{suffix_text}.%(ext)s")
+                final_output_template = os.path.join(self.save_dir, f"%(title)s{suffix_text}.%(ext)s")
 
             self.output_template = temp_output_template
             ydl_opts = self.Handle_ydl_opts(temp_output_template)
@@ -402,8 +413,8 @@ class DownloadingThread(QThread):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: # pyright: ignore[reportArgumentType]
                 ydl.download([self.url])
 
-            if self.download_subtitles:
-                self.download_files_service.Cleanup_subtitle_orig_files(temp_output_template)
+            if self.download_subtitles and not self.stop_requested:
+                self.Start_subtitles_background(final_output_template)
 
             self.status_changed.emit("Copying final files")
             copied_count, removed_temp_count, copied_relative_files = self.download_files_service.Handle_copy_final_files(
@@ -415,11 +426,11 @@ class DownloadingThread(QThread):
             if copied_count > 0:
                 self.files_copied.emit(copied_relative_files)
                 self.details_changed.emit(f"Moved {copied_count} file(s) to target and cleared {removed_temp_count} temp file(s)")
-                self.logger.info("copied files=%s removed_temp=%s", copied_count, removed_temp_count)
+                self.logger.info("final copy done copied=%s removed_temp=%s", copied_count, removed_temp_count)
             else:
                 self.files_copied.emit([])
                 self.details_changed.emit("No new files copied (already exists in target or still partial)")
-                self.logger.info("no files copied from temp workspace")
+                self.logger.info("final copy skipped no new files")
 
             if self.download_chapters and not self.stop_requested:
                 self.chapter_thread = threading.Thread(
@@ -450,7 +461,7 @@ class DownloadingThread(QThread):
                 self.logger.info("download cancelled while handling exception")
                 return
 
-            self.download_failed.emit(str(error))
+            self.download_failed.emit(clean_log_text(error, 260))
             self.Handle_cleanup_temp_cache(self.temp_work_dir)
             self.logger.exception("download thread failed")
 
