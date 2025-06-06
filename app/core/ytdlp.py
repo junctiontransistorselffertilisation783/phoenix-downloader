@@ -63,6 +63,39 @@ def build_subtitle_passes(download_subtitles, video_language=""):
     ]
 
 
+def build_browser_cookie_sources():
+    return [
+        ("edge",),
+        ("chrome",),
+        ("firefox",),
+        ("brave",),
+    ]
+
+
+def build_shared_ydl_options():
+    return {
+        "quiet": True,
+        "no_warnings": True,
+        "sleep_requests": 0.25,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["default", "mweb"],
+            }
+        },
+    }
+
+
+def is_authentication_required_error(error_text):
+    error_text = str(error_text or "").lower()
+    auth_hints = [
+        "sign in to confirm you're not a bot",
+        "use --cookies-from-browser",
+        "use --cookies for the authentication",
+        "cookies-from-browser",
+    ]
+    return any(hint in error_text for hint in auth_hints)
+
+
 def build_quality_format(quality):
     if ("+" in quality) or ("/" in quality) or ("[" in quality):
         return quality
@@ -95,12 +128,11 @@ def build_download_options(output_template, quality, download_type, progress_hoo
         "outtmpl": output_template,
         "noplaylist": download_type != "playlist",
         "progress_hooks": [progress_hook],
-        "quiet": True,
-        "no_warnings": True,
         "continuedl": True,
         "overwrites": False,
         "merge_output_format": "mp4",
     }
+    ydl_opts.update(build_shared_ydl_options())
 
     if download_type == "playlist":
         ydl_opts["ignoreerrors"] = True
@@ -129,13 +161,12 @@ def build_subtitle_download_options(output_template, progress_hook, subtitle_opt
         "outtmpl": output_template,
         "noplaylist": download_type != "playlist",
         "progress_hooks": [progress_hook],
-        "quiet": True,
-        "no_warnings": True,
         "skip_download": True,
         "ignoreerrors": True,
         "continuedl": True,
         "overwrites": False,
     }
+    ydl_opts.update(build_shared_ydl_options())
     if download_type == "playlist":
         playlist_items_text = str(playlist_items or "").strip()
         if playlist_items_text != "":

@@ -5,7 +5,14 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import yt_dlp
 from PyQt5.QtCore import QThread, pyqtSignal
-from app.core.ytdlp import build_playlist_info, build_quality_items, build_video_info
+from app.core.ytdlp import (
+    build_browser_cookie_sources,
+    build_playlist_info,
+    build_quality_items,
+    build_shared_ydl_options,
+    build_video_info,
+    is_authentication_required_error,
+)
 
 
 class DownloadInfoThread(QThread):
@@ -55,9 +62,8 @@ class DownloadInfoThread(QThread):
                 return
 
             ydl_opts = {
-                "quiet": True,
+                **build_shared_ydl_options(),
                 "skip_download": True,
-                "no_warnings": True,
             }
             if self.url_type == "playlist":
                 videos_dict = self.Handle_playlist_info_fast()
@@ -69,8 +75,7 @@ class DownloadInfoThread(QThread):
             else:
                 ydl_opts["noplaylist"] = True
                 info_url = self.Handle_video_only_url(self.url)
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl: # type: ignore
-                    info_dict = ydl.extract_info(info_url, download=False)
+                info_dict = self.Extract_info_with_retry(info_url, ydl_opts)
                 videos_dict = self.Handle_video_info(info_dict)
 
             if self.Is_stopped():
@@ -114,14 +119,12 @@ class DownloadInfoThread(QThread):
 
     def Handle_playlist_info_fast(self):
         flat_opts = {
-            "quiet": True,
+            **build_shared_ydl_options(),
             "skip_download": True,
-            "no_warnings": True,
             "extract_flat": "in_playlist",
         }
 
-        with yt_dlp.YoutubeDL(flat_opts) as ydl: # type: ignore
-            flat_info = ydl.extract_info(self.url, download=False)
+        flat_info = self.Extract_info_with_retry(self.url, flat_opts)
 
         return self.Handle_playlist_info(flat_info)
 
@@ -130,9 +133,8 @@ class DownloadInfoThread(QThread):
             return
 
         full_opts = {
-            "quiet": True,
+            **build_shared_ydl_options(),
             "skip_download": True,
-            "no_warnings": True,
             "noplaylist": True,
         }
 
@@ -151,8 +153,7 @@ class DownloadInfoThread(QThread):
             if entry_url == "":
                 return {"index": index_value, "quality_items": []}
 
-            with yt_dlp.YoutubeDL(full_opts) as ydl: # type: ignore
-                entry_info = ydl.extract_info(entry_url, download=False)
+            entry_info = self.Extract_info_with_retry(entry_url, full_opts)
 
             formats = entry_info.get("formats", [])
             duration_seconds = entry_info.get("duration", 0)
@@ -212,3 +213,29 @@ class DownloadInfoThread(QThread):
         except Exception:
             self.logger.warning("thumbnail download failed")
             return None
+
+    def Extract_info_with_retry(self, url, ydl_opts):
+        options = dict(ydl_opts or {})
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl: # type: ignore
+                return ydl.extract_info(url, download=False)
+        except Exception as error:
+            if not is_authentication_required_error(error):
+                raise
+
+            last_error = error
+            for cookie_source in build_browser_cookie_sources():
+                if self.Is_stopped():
+                    raise last_error
+
+                retry_options = dict(options)
+                retry_options["cookiesfrombrowser"] = cookie_source
+                try:
+                    self.logger.info("retrying yt-dlp info with browser cookies source=%s", cookie_source[0])
+                    with yt_dlp.YoutubeDL(retry_options) as ydl: # type: ignore
+                        return ydl.extract_info(url, download=False)
+                except Exception as retry_error:
+                    last_error = retry_error
+                    continue
+
+            raise last_error

@@ -1,19 +1,43 @@
-/__pycache__/
-/local/
 __pycache__/
-local/
-/venv/
-.venv/
-venv/
-env/
 *.pyc
 *.pyo
 *.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Runtime data
 *.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Download artifacts
+*.part
+*.ytdl
+*.tmp
+downloads/
+Downloads/
+temp_media/
+*.mp4
+*.m4a
+*.webm
+*.srt
+*.vtt
+*.pbf
+
+# Build/packaging
 dist/
 build/
 *.spec
+
+# IDE and tools
 .pytest_cache/
 .mypy_cache/
 .idea/
 .vscode/
+
+# Local dev files (not part of the project)
+local/

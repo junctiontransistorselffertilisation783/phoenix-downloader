@@ -1,4 +1,4 @@
 PyQt5
 requests
-yt-dlp
+yt-dlp[default,curl-cffi]
 pytest

@@ -15,7 +15,7 @@ from app.models.download_job import DownloadJob
 from app.workers.download_thread import DownloadingThread
 from app.workers.get_info_thread import DownloadInfoThread
 from app.ui.ui_downloader import Ui_MainWindow
-from app.core.ytdlp import build_quality_format
+from app.core.ytdlp import build_playlist_quality_items, build_quality_format, is_authentication_required_error
 from app.utils.helpers import build_copied_item, clean_log_text, detect_url_type, get_simple_format_text, get_video_id_from_entry, get_video_id_from_url, is_youtube_url, normalize_url, parse_youtube_url
 
 
@@ -624,13 +624,19 @@ class MainApp(QMainWindow, Ui_MainWindow):
             self.Set_thumbnail_data(selected_thumbnail)
 
         entry_quality_items = entry.get("quality_items", [])
-        self.Load_quality_items(entry_quality_items, ["480p", "720p", "Best"])
+        if entry_quality_items:
+            self.Load_quality_items(entry_quality_items, ["480p", "720p", "Best"])
+        else:
+            fallback_quality_items = build_playlist_quality_items()
+            self.Load_quality_items(fallback_quality_items, ["480p or lower", "720p or lower", "Best available"])
 
         entry_title = str(entry.get("title", ""))
         self.status_label.setText(entry_title)
         total_entries = len(self.playlist_entries)
         self.playlist_num_display.setText(f"{selected_index + 1}/{total_entries}")
-        self.downloadButton.setEnabled(bool(entry_quality_items))
+        self.downloadButton.setEnabled(self.quality_comboBox.count() > 0)
+        if not entry_quality_items:
+            self.progress_details_label.setText("Using fallback playlist quality options while detailed formats are still loading")
         self.Update_playlist_download_hint()
 
     def Handle_get_video_info(self):
@@ -818,7 +824,11 @@ class MainApp(QMainWindow, Ui_MainWindow):
         self.downloadButton.setEnabled(False)
         self.status_label.setText("Failed to load info")
         self.progress_details_label.setText("Could not read this URL. Check URL and try again.")
-        QMessageBox.critical(self, "Error", "Could not load video info. Please try again.")
+        message_text = "Could not load video info. Please try again."
+        if is_authentication_required_error(error_text):
+            self.progress_details_label.setText("YouTube requested browser verification. The app will retry with browser cookies when available")
+            message_text = "YouTube requested browser verification. Make sure you are signed in to YouTube in Chrome, Edge, Firefox, or Brave, then try again."
+        QMessageBox.critical(self, "Error", message_text)
         logger.warning("video info load failed: %s", clean_log_text(error_text))
 
     def Handle_download(self):

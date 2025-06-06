@@ -1,61 +1,181 @@
 # Phoenix Downloader
 
-Simple PyQt5 desktop app to download YouTube video/audio with playlist support.
+> A PyQt5 desktop downloader for YouTube videos, audio, and playlists. Built around `yt-dlp`, with playlist range selection, optional subtitles and chapter files, SQLite persistence, resumable temp caching, structured logging, and automated tests.
 
-## What It Can Do
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
+![PyQt5](https://img.shields.io/badge/PyQt5-Desktop_UI-41CD52?logo=qt&logoColor=white)
+![yt-dlp](https://img.shields.io/badge/yt--dlp-download_engine-blue)
+![SQLite](https://img.shields.io/badge/SQLite-local_state-003B57?logo=sqlite&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-pytest-green)
+![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)
 
-- Load video info from YouTube URL
-- Download single video or playlist range
+## Preview
+
+Phoenix Downloader is a desktop YouTube downloader focused on practical playlist workflows, resumable downloads, and a cleaner GUI experience on top of `yt-dlp`.
+
+![Phoenix Downloader Main Window](docs/assets/screenshots/main-window.png)
+
+| Playlist Mode | Download Progress |
+| --- | --- |
+| ![Playlist Mode](docs/assets/screenshots/playlist-mode.png) | ![Download Progress](docs/assets/screenshots/download-progress.png) |
+
+## Overview
+
+Phoenix Downloader is a Windows-oriented desktop app that makes common `yt-dlp` workflows easier through a GUI. It can inspect a YouTube URL, show available formats, download a single video, download a full playlist, download only the current playlist video, or download a custom playlist range.
+
+This project started as an older working downloader and was later refactored into a more maintainable Python application. The current version separates UI, worker threads, services, repositories, models, core helpers, and tests.
+
+## Features
+
+- Single video download with quality selection
+- Full playlist, current playlist video, and custom range download modes
+- Mixed `watch?v=...&list=...` URL handling with current video auto-selection
 - Audio-only mode
-- Subtitle and chapter support
-- Resume-friendly temp cache in AppData
-- Reuse already downloaded files
-- Save state and settings in SQLite
-- Write app logs to file
+- Optional subtitle download with manual/auto fallback passes
+- Optional PotPlayer `.pbf` chapter file generation
+- Thumbnail preview and video metadata loading
+- Recent URL and folder history
+- AppData temp workspace for safer resume/reuse behavior
+- SQLite-backed download state and app settings
+- Reuse of already downloaded files when possible
+- Log file for debugging real failures without exposing noisy errors to users
+- Pytest coverage for helper logic, playlist rules, file rules, yt-dlp options, and SQLite stores
+
+## Highlights
+
+- Built as a desktop GUI layer over `yt-dlp` for easier everyday use
+- Supports playlists, current-video-only mode, and manual range selection
+- Uses SQLite for local state and history instead of flat app-only memory
+- Keeps subtitle failures optional so the main video download can still succeed
+- Refactored from an older codebase into clearer services, repositories, workers, and helpers
+
+## How It Works
+
+```mermaid
+flowchart TD
+    A[User enters YouTube URL] --> B[MainApp UI]
+    B --> C[DownloadInfoThread]
+    C --> D[yt-dlp metadata extraction]
+    D --> B
+    B --> E[DownloaderService builds request]
+    E --> F[DownloadingThread]
+    F --> G[yt-dlp media download]
+    F --> H[Optional subtitle pass]
+    F --> I[Optional chapter writer]
+    F --> J[DownloadFilesService copies final files]
+    J --> K[DownloadStateStore SQLite state]
+    K --> B
+```
+
+The main video download is treated as the primary success path. Subtitle and chapter work is optional, so subtitle rate limits or missing captions should not mark the whole video download as failed.
+
+## Project Structure
+
+```text
+Phoenix_Downloader/
+├── app/
+│   ├── core/              # database setup, logging setup, yt-dlp helpers
+│   ├── models/            # dataclasses used between UI/workers/services
+│   ├── repositories/      # SQLite-backed state/settings stores
+│   ├── services/          # download workflow and file operations
+│   ├── ui/                # PyQt5 main window and generated UI resources
+│   ├── utils/             # pure helper functions
+│   └── workers/           # QThread-based info and download workers
+├── docs/
+│   └── assets/
+│       └── screenshots/   # README screenshots
+├── tests/                 # pytest test suite
+├── LICENSE
+├── main.py                # application entrypoint
+├── requirements.txt
+└── README.md
+```
+
+## Skills Demonstrated
+
+| Area | What this project shows |
+| --- | --- |
+| Desktop GUI | PyQt5 widgets, Qt signals, background workers, responsive UI state |
+| Concurrency | `QThread`, Python threads, progress hooks, safe UI updates |
+| Download integration | `yt-dlp` format selection, playlist handling, subtitle/chapter workflows |
+| Persistence | SQLite schema, repositories, settings/history storage, interrupted-state recovery |
+| File workflow | temp workspace, final copy, old temp cleanup, reuse of completed downloads |
+| Error handling | user-friendly messages, optional subtitle failure flow, internal logs |
+| Testing | pytest tests for helpers, services, repositories, and yt-dlp option building |
+| Refactoring | split from large UI/worker files into services, repositories, models, and core helpers |
 
 ## Requirements
 
 - Python 3.10+
-- Windows (tested flow uses AppData paths)
+- Windows recommended/tested
+- FFmpeg available in `PATH` for reliable media merge and subtitle handling
+- A signed-in browser session can help when YouTube asks for verification
 
-Install dependencies:
+Install FFmpeg separately if it is not already available on your system.
+If YouTube blocks anonymous extraction on some videos, keep YouTube signed in on Edge, Chrome, Firefox, or Brave so the app can retry with browser cookies.
+
+## Setup
 
 ```bash
-pip install -r requirements.txt
+python -m venv venv
+venv\Scripts\activate
+python -m pip install -r requirements.txt
 ```
 
-## Run App
+## Run
 
 ```bash
 python main.py
 ```
 
-## Run Tests
+## Test
 
 ```bash
 python -m pytest tests
 ```
 
-## Project Structure
+Optional syntax check:
 
-- `app/ui/` - window and UI behavior
-- `app/workers/` - background threads for info/download
-- `app/services/` - download workflow and file logic
-- `app/repositories/` - SQLite read/write stores
-- `app/core/` - database, yt-dlp helpers, logging setup
-- `app/models/` - dataclasses for app flow
-- `app/utils/` - pure helper functions
-- `tests/` - pytest test files
+```bash
+python -m compileall app tests
+```
 
-## Local Data Paths
+## Local Data
 
-The app stores data in Local AppData under `PhoenixDownloader`:
+Runtime data is stored under Local AppData:
 
-- `phoenix_downloader.db` - SQLite database
-- `logs/app.log` - log file
-- `temp_media/` - temp/resume folder
+```text
+%LOCALAPPDATA%\PhoenixDownloader\
+├── phoenix_downloader.db
+├── logs\app.log
+└── temp_media\
+```
 
-## Notes
+These files are intentionally ignored by Git.
 
-- Some subtitle requests can fail due to YouTube rate limits (for example HTTP 429).
-- The app keeps user-friendly error messages in UI and technical details in logs.
+## Usage Notes
+
+- For a normal video URL, the app loads video metadata and available qualities.
+- For a playlist URL, the app loads playlist entries and lets you choose full playlist, current video, or a custom range.
+- For a mixed `watch?v=...&list=...` URL, the app opens playlist mode and selects the current video by default.
+- If YouTube asks for bot verification, the app retries metadata loading with browser cookies when available.
+- Subtitle failures such as HTTP 429 are treated as optional; the video can still finish successfully.
+- If a merge or conversion fails, check that FFmpeg is installed and available in `PATH`.
+
+## Known Limitations
+
+- The app is mainly tested on Windows.
+- The UI design is still based on the original desktop layout; the refactor focused on reliability and maintainability.
+- YouTube subtitle requests can be rate-limited by YouTube or `yt-dlp`.
+- Packaging with PyInstaller is not included yet.
+
+## Roadmap Ideas
+
+- Add packaged Windows release with PyInstaller
+- Add screenshots or a short demo GIF
+- Add more tests for edge-case playlist and filesystem behavior
+- Later project stage: modern UI refresh or `pathlib` migration if needed
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
