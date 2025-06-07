@@ -11,13 +11,17 @@
 
 ## Preview
 
-Phoenix Downloader is a desktop YouTube downloader focused on practical playlist workflows, resumable downloads, and a cleaner GUI experience on top of `yt-dlp`.
+### Main Window
 
 ![Phoenix Downloader Main Window](docs/assets/screenshots/main-window.png)
 
-| Playlist Mode | Download Progress |
-| --- | --- |
-| ![Playlist Mode](docs/assets/screenshots/playlist-mode.png) | ![Download Progress](docs/assets/screenshots/download-progress.png) |
+### Playlist Mode
+
+![Playlist Mode](docs/assets/screenshots/playlist-mode.png)
+
+### Download Progress
+
+![Download Progress](docs/assets/screenshots/download-progress.png)
 
 ## Overview
 
@@ -109,10 +113,10 @@ Phoenix_Downloader/
 - Python 3.10+
 - Windows recommended/tested
 - FFmpeg available in `PATH` for reliable media merge and subtitle handling
-- A signed-in browser session can help when YouTube asks for verification
+- A signed-in browser session can help when some metadata requests require authentication
 
 Install FFmpeg separately if it is not already available on your system.
-If YouTube blocks anonymous extraction on some videos, keep YouTube signed in on Edge, Chrome, Firefox, or Brave so the app can retry with browser cookies.
+For content you are authorized to access, keep YouTube signed in on Edge, Chrome, Firefox, or Brave if metadata extraction needs an existing browser session.
 
 ## Setup
 
@@ -158,9 +162,13 @@ These files are intentionally ignored by Git.
 - For a normal video URL, the app loads video metadata and available qualities.
 - For a playlist URL, the app loads playlist entries and lets you choose full playlist, current video, or a custom range.
 - For a mixed `watch?v=...&list=...` URL, the app opens playlist mode and selects the current video by default.
-- If YouTube asks for bot verification, the app retries metadata loading with browser cookies when available.
+- For content you are authorized to access, the app can retry metadata loading with an existing browser session when authentication is required.
 - Subtitle failures such as HTTP 429 are treated as optional; the video can still finish successfully.
 - If a merge or conversion fails, check that FFmpeg is installed and available in `PATH`.
+
+## Responsible Use
+
+Phoenix Downloader is intended for content you own, content you have permission to download, or content where downloading is allowed by the service, license, or applicable law. The repository does not include downloaded media.
 
 ## Known Limitations
 
@@ -172,7 +180,7 @@ These files are intentionally ignored by Git.
 ## Roadmap Ideas
 
 - Add packaged Windows release with PyInstaller
-- Add screenshots or a short demo GIF
+- Add a short demo GIF
 - Add more tests for edge-case playlist and filesystem behavior
 - Later project stage: modern UI refresh or `pathlib` migration if needed
 
